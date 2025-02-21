@@ -85,11 +85,14 @@ begin
 	include("setReconParams.jl")
 end;
 
+# ╔═╡ 61cc2b53-5bde-4671-8efc-8082e804acb1
+## Import reconstruction helper functions
+include("reconFuncs.jl");
+
 # ╔═╡ a67436e9-92bd-465a-9f11-45bc350dfafb
 ## Test multithreading
 begin
-	Niters = Int(1e6)
-	testMultithread(Niters)
+	testMultithread(Int(1e6))
 end;
 
 # ╔═╡ e98ab10c-8e0a-4fd3-ac1b-b6bd124fe8a4
@@ -172,7 +175,7 @@ end;
 # ╔═╡ 96180df6-f47e-47e9-bf30-c8db4d0d2d91
 ## Compute Lipschitz constant of MRI forward operator
 begin
-	σ1A = 0.9997692 # Computed from last timeS
+	σ1A = 0.9997692 # Computed from last time
 	if !@isdefined σ1A
 	    (_, σ1A) = poweriter(undim(A)) # Compute using power iteration. Takes ~14 mins
 	end
@@ -188,18 +191,75 @@ begin
 	println("Shape of k-space data: ", size(ksp))
 end;
 
+# ╔═╡ c3d8c3c3-de0f-425d-8489-a6e30b66e12f
+## Define cost functions, gradient, and step size
+begin
+	dc_cost = X -> 0.5 * norm(A * X - ksp)^2 # data consistency
+	nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
+	total_cost = X -> dc_cost(X) + nn_cost(X)
+
+	dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
+	μ = 0.8 / (σ1A^2)
+end;
+
 # ╔═╡ 42644310-01b2-466e-8932-a6f9f242a2d4
-## Initialize solution
-X0 = A' * ksp # adjoint (zero-filled)
+## Initialize solution (zero-filled)
+X0 = A' * ksp;
 
-# ╔═╡ 584f7146-3965-43e9-a3aa-3beb7140c7a0
+# ╔═╡ 06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
+## Begin iterative reconstruction using ISTA (Otazo et al. 2015), w/o S part
+begin
+	Niters = 10
+	dc_costs = zeros(Niters + 1)
+	nn_costs = zeros(Niters + 1)
 
+	X = X0
+	dc_costs[1] = dc_cost(X)
+	nn_costs[1] = nn_cost(X)
+	
+	for k = 1:Niters
+		if k == 1 # Benchmark first iteration
+			println("Computational metrics:")
+			@showtime X = X - μ * dc_cost_grad(X)
+			@showtime X = patchSVST(X, λ_L, patch_size, stride_size; prob=patch_prob)
+		else
+			X = X - A' * (A * X - ksp)
+			X = patchSVST(X, λ_L, patch_size, stride_size; prob=patch_prob)
+		end
+
+		# save costs
+		dc_costs[k + 1] = dc_cost(X)
+		nn_costs[k + 1] = nn_cost(X)
+	end
+end
+
+# ╔═╡ 96573a20-dd01-4102-ae8f-c67d55bdecab
+## Plot costs
+begin
+	plot(title="Optimization progress", xlabel="iteration", ylabel="cost")
+	plot!(0:Niters, dc_costs; label="data consistency", marker=:xcross)
+	plot!(0:Niters, nn_costs; label="nuclear norm penalty, λ_L = $λ_L", marker=:xcross)
+	plot!(0:Niters, dc_costs + nn_costs; label="overall cost", marker=:xcross)
+	plot!(legend=:right)
+end
+
+# ╔═╡ 4e30390e-3d67-4152-92b8-0d8cfd558041
+begin
+	println(nn_cost(X0))
+	println(nn_cost(patchSVST(X0, λ_L, patch_size, stride_size; prob=patch_prob)))
+end
 
 # ╔═╡ 10d74509-432c-4501-9364-d49659694c3d
 ## Plot initial solution
 begin
 	frame = Nt
-	plt_init = jim(mid3(X0[:,end:-1:1,end:-1:1,frame]); title="|Zero-filled SENSE combination|, R ≈ $(round(R, sigdigits=4))", xlabel=L"x, z", ylabel=L"z, y");
+	jim(mid3(X0[:,end:-1:1,end:-1:1,frame]); title="|Zero-filled SENSE combination|, R ≈ $(round(R, sigdigits=4))", xlabel=L"x, z", ylabel=L"z, y");
+end
+
+# ╔═╡ ed316545-49a6-4fa4-9142-8b709a103468
+## Plot final solution
+begin
+	jim(mid3(X[:,end:-1:1,end:-1:1,frame]); title="|Nuclear norm regularized recon|, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y");
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -2145,9 +2205,14 @@ version = "1.4.1+2"
 # ╠═e3e01368-771b-46a8-9a76-0ef9b8086db1
 # ╠═96180df6-f47e-47e9-bf30-c8db4d0d2d91
 # ╠═6cebc23b-626d-44ac-bdca-b95a6498e6c3
-# ╠═42644310-01b2-466e-8932-a6f9f242a2d4
 # ╠═2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
-# ╠═584f7146-3965-43e9-a3aa-3beb7140c7a0
+# ╠═61cc2b53-5bde-4671-8efc-8082e804acb1
+# ╠═c3d8c3c3-de0f-425d-8489-a6e30b66e12f
+# ╠═42644310-01b2-466e-8932-a6f9f242a2d4
+# ╠═06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
+# ╠═96573a20-dd01-4102-ae8f-c67d55bdecab
+# ╠═4e30390e-3d67-4152-92b8-0d8cfd558041
 # ╠═10d74509-432c-4501-9364-d49659694c3d
+# ╠═ed316545-49a6-4fa4-9142-8b709a103468
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
