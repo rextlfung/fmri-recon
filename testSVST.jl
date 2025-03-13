@@ -4,19 +4,7 @@
 using Markdown
 using InteractiveUtils
 
-# This Pluto notebook uses @bind for interactivity. When running this notebook outside of Pluto, the following 'mock version' of @bind gives bound variables a default value (instead of an error).
-macro bind(def, element)
-    #! format: off
-    quote
-        local iv = try Base.loaded_modules[Base.PkgId(Base.UUID("6e696c72-6542-2067-7265-42206c756150"), "AbstractPlutoDingetjes")].Bonds.initial_value catch; b -> missing; end
-        local el = $(esc(element))
-        global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : iv(el)
-        el
-    end
-    #! format: on
-end
-
-# ╔═╡ 0b069602-1ccf-49be-8e82-d0b9626a4b2f
+# ╔═╡ bc63c134-f300-11ef-289a-4977f5c27bae
 ## Import modules
 begin
 	# Math
@@ -28,7 +16,7 @@ begin
 
 	# Probability and statistics
 	using Random: seed!
-	using Statistics, StatsBase
+	using StatsBase
 
 	# Parallel computing
 	using Distributed
@@ -36,7 +24,7 @@ begin
 	
 	# Reading/writing files
 	using MAT: matread, matwrite
-	using JLD2, NIfTI, HDF5
+	using JLD2, NIfTI
 
 	# Plotting
 	using Plots; cgrad, default(markerstrokecolor=:auto, label="")
@@ -46,13 +34,7 @@ begin
 	using Unitful, LaTeXStrings, PlutoUI, Printf
 end;
 
-# ╔═╡ a9670567-ce91-4244-bf7a-f7099a34daa6
-## Import functions
-begin
-	include("testMultithread.jl")
-end;
-
-# ╔═╡ 59d1f766-44ae-4ee6-b4f9-51ddfbbff672
+# ╔═╡ 1c5ceaaf-9a2f-4d01-a8da-bf704471210e
 ## Declare and set path and experimental variables
 begin
 	# Path variables. DO NOT EDIT.
@@ -72,230 +54,33 @@ begin
 	include("setVars.jl");
 end;
 
-# ╔═╡ 2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
+# ╔═╡ 3af20573-4fe6-462b-8ae9-e11e64a748af
+## Import reconstruction helper functions
+include("reconFuncs.jl");
+
+# ╔═╡ 6ca30bd5-4654-4729-971c-10a2e4ff9326
 ## Set reconstruction hyperparameters
 begin
 	# Declare hyperparameters here to avoid scope issues
 	λ_L = 0 # weight for nuclear norm penalty term
 	patch_size = [1, 1, 1] # side lengths for cubic patches
 	stride_size = [1, 1, 1]
-
-	# Set them by running external script. EDIT THIS FILE.
-	include("setReconParams.jl")
+	patch_prob = 1 # probability of low-rankifying each patch
 end;
 
-# ╔═╡ 61cc2b53-5bde-4671-8efc-8082e804acb1
-## Import reconstruction helper functions
-include("reconFuncs.jl");
+# ╔═╡ c85b5030-b1ec-482e-8cd7-b279f6b4f209
+## Nuclear norm penalty term
+nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size));
 
-# ╔═╡ a67436e9-92bd-465a-9f11-45bc350dfafb
-## Test multithreading
+# ╔═╡ 4d2f3b68-3ee9-4f3a-b591-ed5b5a31bf30
 begin
-	testMultithread(Int(1e6))
-end;
-
-# ╔═╡ e98ab10c-8e0a-4fd3-ac1b-b6bd124fe8a4
-## Load in zero-filled k-space data from .mat file
-begin
-	file = h5open(ksp_path, "r") # opne file in read mode
-	ksp0 = file["ksp_zf"][:, :, :, :, 1:Nt]
-	ksp0 = Complex{Float32}[complex(k.real, k.imag) for k in ksp0]
-	ksp0 ./= norm(ksp0)
-	@assert (Nx, Ny, Nz, Nc, Nt) == size(ksp0)
-
-	# Make k-space vectors for plotting
-	kx = (-(Nx ÷ 2):(Nx ÷ 2 - 1)) .* Δkx
-	ky = (-(Ny ÷ 2):(Ny ÷ 2 - 1)) .* Δky
-	kz = (-(Nz ÷ 2):(Nz ÷ 2 - 1)) .* Δkz
-end;
-
-# ╔═╡ b7358e00-f2a1-49f1-af7f-a8fdfb6c5483
-## Infer sampling patterns from zero-filled k-space data
-Ω = (ksp0[:,:,:,1,:] .!= 0);
-
-# ╔═╡ 9561a301-ca5e-4c4b-84ba-7c3768953852
-## Infer accleration/undersampling factor
-R = (Nx*Ny*Nz)/sum(Ω[:,:,:,1])
-
-# ╔═╡ 91f9043f-ad49-4c53-8a22-c6051af1a2fd
-## Validate sampling patterns
-begin
-	# 1. All coils have the same sampling pattern
-	for ic in 2:Nc 
-		@assert Ω == (ksp0[:,:,:,ic,:] .!= 0) "Detected a different sampling pattern for coil $ic"
-	end
-
-	# 2. All time frames acquire the same number of samples
-	for it in 2:Nt
-		@assert sum(Ω[:,:,:,it]) == sum(Ω[:,:,:,it - 1]) "Detected a different number of samples for frame $it"
-	end
-end;
-
-# ╔═╡ 6c069eaa-36ed-4a34-abab-ea5cf2ec3b55
-## Slider for selecting frame
-@bind t Slider(1:Nt; show_value=true)
-
-# ╔═╡ 3f7f7869-aeb0-4702-9599-b04748dfa5a5
-## Scrubbable plot of dynamic sampling patterns
-jim(Ω[1,:,:,t]; colorbar=:none, title="Sampling patterns for frame $t. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
-
-# ╔═╡ 0d95d0c0-9d6b-4d06-99f4-f4ab2aa9c4b9
-## Plot cumulative sampling pattern
-begin
-	samp_sum = sum(Ω, dims=4)
-	color = cgrad([:blue, :black, :white], [0, 1/2Nt, 1])
-	jim(samp_sum[1,:,:]; color, clim=(0, Nt), title="Cumulative sampling pattern. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
+	X = randn((Nx, Nt))
+	X_lr = SVST(X, median(svdvals(X)))
+	@show rank(X)
+	@show rank(X_lr)
+	plot(svdvals(X))
+	plot!(svdvals(X_lr))
 end
-
-# ╔═╡ 05311f6a-80c4-4515-810a-791efb9c21af
-## Load in sensitivity maps
-begin
-	smaps_raw = matread(smaps_path)["smaps"] # raw coil sensitivity maps
-	
-	# Normalize sensitivity maps along the coil dimension
-	smaps = smaps_raw ./ sqrt.(sum(abs2.(smaps_raw), dims=ndims(smaps_raw)))
-	smaps[isnan.(smaps)] .= 0
-	@assert all(sqrt.(sum(abs2.(smaps), dims=ndims(smaps))) .≈ 1) "Sensitivity maps not normalized"
-end;
-
-# ╔═╡ e3e01368-771b-46a8-9a76-0ef9b8086db1
-## SENSE forward model
-begin
-	# Otazo style MRI forward operator for a single time frame
-	Aotazo = (Ω, smaps) -> Asense(Ω, smaps; fft_forward=true, unitary=true)
-
-	# Encoding matrix for entire time series as block diagonal matrix
-	A = block_diag([Aotazo(s, smaps) for s in eachslice(Ω, dims=ndims(Ω))]...)
-
-	# Display input and output dimensions
-	println("Input dimensions: ", A._idim)
-	println("Output dimensions: ", A._odim)
-end;
-
-# ╔═╡ 6cebc23b-626d-44ac-bdca-b95a6498e6c3
-## Preprocess k-space data to be in the shape of the odim of A
-begin
-	# Flatten spatial dimensions of k-space data and discard zeros
-	ksp = reshape(ksp0, :, Nc, Nt)
-	ksp = [ksp[vec(s),:,it] for (it,s) in enumerate(eachslice(Ω, dims=4))]
-	ksp = cat(ksp..., dims=3) # (Nsamples, Nc, Nt), no "zeros"
-	println("Shape of k-space data: ", size(ksp))
-end;
-
-# ╔═╡ 96180df6-f47e-47e9-bf30-c8db4d0d2d91
-## Compute Lipschitz constant of MRI forward operator
-begin
-	σ1A = 0.9997692 # Computed from last time
-	if !@isdefined σ1A
-	    (_, σ1A) = poweriter(undim(A)) # Compute using power iteration. Takes ~14 mins
-	end
-end;
-
-# ╔═╡ c3d8c3c3-de0f-425d-8489-a6e30b66e12f
-## Define cost functions, gradient, and step size
-begin
-	dc_cost = X -> 0.5 * norm(A * X - ksp)^2
-	nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
-	total_cost = X -> dc_cost(X) + nn_cost(X)
-
-	dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
-	μ = 0.8 / (σ1A^2) # step size for GD
-end;
-
-# ╔═╡ 42644310-01b2-466e-8932-a6f9f242a2d4
-## Initialize solution (zero-filled)
-X0 = A' * ksp;
-
-# ╔═╡ 06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
-## Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-begin
-	Niters = 20
-	dc_costs = zeros(Niters + 1)
-	nn_costs = zeros(Niters + 1)
-
-	X = X0
-	dc_costs[1] = dc_cost(X)
-	nn_costs[1] = nn_cost(X)
-	
-	for k = 1:Niters
-		if k == 1 # Benchmark first iteration
-			println("Computational metrics:")
-			@showtime X = X - μ * dc_cost_grad(X)
-			@showtime X = patchSVST(X, λ_L, patch_size, stride_size)
-		else
-			X = X - μ * dc_cost_grad(X) # Gradient descent on data-consistency
-			X = patchSVST(X, λ_L, patch_size, stride_size) # "Proximal" operator on nuclear norm
-		end
-
-		# save costs
-		dc_costs[k + 1] = dc_cost(X)
-		nn_costs[k + 1] = nn_cost(X)
-	end
-end
-
-# ╔═╡ 96573a20-dd01-4102-ae8f-c67d55bdecab
-## Plot costs
-begin
-	plot(title="Optimization progress", xlabel="iteration", ylabel="cost")
-	plot!(0:Niters, dc_costs; label="data consistency", marker=:xcross)
-	plot!(0:Niters, nn_costs; label="nuclear norm penalty, λ_L = $λ_L", marker=:xcross)
-	plot!(0:Niters, dc_costs + nn_costs; label="overall cost", marker=:xcross)
-	plot!(legend=:best)
-end
-
-# ╔═╡ 4e30390e-3d67-4152-92b8-0d8cfd558041
-## Test SVST to make sure it decreases nuclear norm
-# TODO: Write a synthetic test case for nn_cost and patchSVST
-# e.g. construct a dataset with known rank and 
-begin
-	println(nn_cost(X0))
-	println(nn_cost(patchSVST(X0, λ_L, patch_size, stride_size)))
-end
-
-# ╔═╡ 04345e88-d66e-4995-a1c1-857b15f6edf1
-## Slider for selecting frame
-@bind frame Slider(1:Nt; show_value=true)
-
-# ╔═╡ 10d74509-432c-4501-9364-d49659694c3d
-## Plot initial solution
-begin
-	jim(mid3(X0[:,end:-1:1,end:-1:1,frame]); title="|Zero-filled SENSE combination|, R ≈ $(round(R, sigdigits=4)), frame $frame", xlabel=L"x, z", ylabel=L"z, y");
-end
-
-# ╔═╡ ed316545-49a6-4fa4-9142-8b709a103468
-## Plot final solution
-begin
-	jim(mid3(X[:,end:-1:1,end:-1:1,frame]); title="|Nuclear norm regularized recon|, λ_L = $λ_L, frame $frame", xlabel=L"x, z", ylabel=L"z, y");
-end
-
-# ╔═╡ cc65fbf7-2a5b-47d5-b808-ed6b49382963
-## Inspect patches of intitial and final solution
-begin
-	P0 = img2patches(X0, patch_size, stride_size);
-	Opnorms0 = mapslices(opnorm, P0, dims=(1,2))
-	P0 ./= Opnorms0
-	svs0 = mapslices(svdvals, P0, dims=(1,2));
-
-	P = img2patches(X, patch_size, stride_size);
-	Opnorms = mapslices(opnorm, P, dims=(1,2))
-	P ./= Opnorms
-	svs = mapslices(svdvals, P, dims=(1,2));
-
-	Np = size(svs,3)
-end;
-
-# ╔═╡ f011fdec-c713-469e-8bfd-f105fc25a9f7
-begin
-	plot(title="Average SVs for $Np normalized patches", xlabel="SV index")
-	plot!(1:size(svs0, 1), mean(svs0, dims=3)[:,1,1]; label=L"X_0", marker=:xcross)
-	plot!(1:size(svs, 1), mean(svs, dims=3)[:,1,1]; label=L"X_∞", marker=:xcross)
-end
-
-# ╔═╡ 64db57d0-d151-4ab7-9a36-08993d70f137
-histogram(median(svs0, dims=1)[1,1,:], bins=200, title=string("Histogram of median SVs of ", L"X_0", ", Np = $Np"), xlabel="median σ", ylabel="frequency")
-
-# ╔═╡ 16c5ccbd-2a8f-4af1-9ec4-958c4b15e181
-histogram(median(svs, dims=1)[1,1,:], bins=200, title=string("Histogram of median SVs of ", L"X_∞", ", Np = $Np"), xlabel="median σ", ylabel="frequency")
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -303,7 +88,6 @@ PLUTO_PROJECT_TOML_CONTENTS = """
 AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
-HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -316,14 +100,12 @@ Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
 [compat]
 AbstractFFTs = "~1.5.0"
 FFTW = "~1.8.1"
-HDF5 = "~0.17.2"
 JLD2 = "~0.5.11"
 LaTeXStrings = "~1.4.0"
 LinearMapsAA = "~0.12.0"
@@ -333,7 +115,6 @@ MIRTjim = "~0.25.0"
 NIfTI = "~0.6.1"
 Plots = "~1.40.9"
 PlutoUI = "~0.7.61"
-Statistics = "~1.11.1"
 StatsBase = "~0.34.4"
 Unitful = "~1.22.0"
 """
@@ -342,9 +123,9 @@ Unitful = "~1.22.0"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.11.4"
+julia_version = "1.11.3"
 manifest_format = "2.0"
-project_hash = "13c80f76a610f6009461db09a71655a1be8a0c01"
+project_hash = "3bfc779b1c7cb7c1cb2be1c7b8f238b7a609023e"
 
 [[deps.AVSfldIO]]
 deps = ["FileIO"]
@@ -1409,7 +1190,7 @@ version = "0.3.27+1"
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
-version = "0.8.1+4"
+version = "0.8.1+2"
 
 [[deps.OpenMPI_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Hwloc_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "MPIPreferences", "TOML", "Zlib_jll"]
@@ -2229,34 +2010,11 @@ version = "1.4.1+2"
 """
 
 # ╔═╡ Cell order:
-# ╠═0b069602-1ccf-49be-8e82-d0b9626a4b2f
-# ╠═a9670567-ce91-4244-bf7a-f7099a34daa6
-# ╠═59d1f766-44ae-4ee6-b4f9-51ddfbbff672
-# ╠═a67436e9-92bd-465a-9f11-45bc350dfafb
-# ╠═e98ab10c-8e0a-4fd3-ac1b-b6bd124fe8a4
-# ╠═b7358e00-f2a1-49f1-af7f-a8fdfb6c5483
-# ╠═9561a301-ca5e-4c4b-84ba-7c3768953852
-# ╠═91f9043f-ad49-4c53-8a22-c6051af1a2fd
-# ╟─6c069eaa-36ed-4a34-abab-ea5cf2ec3b55
-# ╠═3f7f7869-aeb0-4702-9599-b04748dfa5a5
-# ╠═0d95d0c0-9d6b-4d06-99f4-f4ab2aa9c4b9
-# ╠═05311f6a-80c4-4515-810a-791efb9c21af
-# ╠═e3e01368-771b-46a8-9a76-0ef9b8086db1
-# ╠═6cebc23b-626d-44ac-bdca-b95a6498e6c3
-# ╠═2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
-# ╠═61cc2b53-5bde-4671-8efc-8082e804acb1
-# ╠═96180df6-f47e-47e9-bf30-c8db4d0d2d91
-# ╠═c3d8c3c3-de0f-425d-8489-a6e30b66e12f
-# ╠═42644310-01b2-466e-8932-a6f9f242a2d4
-# ╠═06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
-# ╠═96573a20-dd01-4102-ae8f-c67d55bdecab
-# ╠═4e30390e-3d67-4152-92b8-0d8cfd558041
-# ╠═04345e88-d66e-4995-a1c1-857b15f6edf1
-# ╠═10d74509-432c-4501-9364-d49659694c3d
-# ╠═ed316545-49a6-4fa4-9142-8b709a103468
-# ╠═cc65fbf7-2a5b-47d5-b808-ed6b49382963
-# ╠═f011fdec-c713-469e-8bfd-f105fc25a9f7
-# ╠═64db57d0-d151-4ab7-9a36-08993d70f137
-# ╠═16c5ccbd-2a8f-4af1-9ec4-958c4b15e181
+# ╠═bc63c134-f300-11ef-289a-4977f5c27bae
+# ╠═1c5ceaaf-9a2f-4d01-a8da-bf704471210e
+# ╠═6ca30bd5-4654-4729-971c-10a2e4ff9326
+# ╠═3af20573-4fe6-462b-8ae9-e11e64a748af
+# ╠═c85b5030-b1ec-482e-8cd7-b279f6b4f209
+# ╠═4d2f3b68-3ee9-4f3a-b591-ed5b5a31bf30
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

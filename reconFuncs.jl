@@ -121,13 +121,21 @@ Outputs:
 cost: scalar nuclear norm penalty.
 """
 function patch_nucnorm(P::AbstractArray)
-    costs = zeros(size(P, ndims(P))) # ur welcome
+    Np = size(P, ndims(P))
+    costs = zeros(Np)
 
-    @threads for ip = 1:size(P, ndims(P))
+    # normalize each patch via division of their 2-norm (leading SV)
+    σ1s = mapslices(opnorm, P, dims=(1,2))
+    P ./= σ1s
+
+    @threads for ip = 1:Np
         costs[ip] = sum(svdvals(P[:,:,ip]))
     end
 
-    return sum(costs)
+    # revert normalization to preserve inter-patch contrast
+    P .*= σ1s
+
+    return sum(costs)/Np
 end;
 
 """
@@ -138,6 +146,7 @@ proximal operator to nuclear norm
 
 Inputs:
 X: matrix to be low-rankified via SVST
+β: threshold hyperparameter
 
 Outputs:
 low-rankified version of X
@@ -150,30 +159,35 @@ function SVST(X::AbstractMatrix, β)
 end;
 
 """
-patchSVST(X::AbstractArray, β, patch_size, step_size; prob=1)
+patchSVST(img::AbstractArray, β, patch_size, stride_size; prob=1)
 
 apply SVST to in a patch-wise manner to an image
 average of proximal operators to the nuclear norm
 
 Inputs:
 img: 3D time series data of size (Nx, Ny, Nz, Nt)
-β: soft-thresholding threshold hyperparameter
+β: soft-thresholding threshold
 patch_size: length 3 vector describing the side lengths of cubic patches
 stride_size: length 3 vector describing the stride lengths between patches
 
 Outputs:
 patch-wise low-rankified version of img
 """
-function patchSVST(img::AbstractArray, β, patch_size, stride_size; prob=1)
+function patchSVST(img::AbstractArray, β, patch_size, stride_size)
     # extract patches
     P = img2patches(img, patch_size, stride_size)
+
+    # normalize each patch via division of their 2-norm (leading SV)
+    σ1s = mapslices(opnorm, P, dims=(1,2))
+    P ./= σ1s
     
     # low-rankify each patch with probability p
-    ips = 1:size(P,5)
-    ips = ips[rand(size(P,5)) .<= prob]
-    for ip = ips
+    @threads for ip = 1:size(P, ndims(P))
         P[:,:,ip] = SVST(P[:,:,ip], β) # can this be done in-place for speed?
     end
+
+    # revert normalization to preserve inter-patch contrast
+    P .*= σ1s
 
     # recombine patches into image and return
     return patches2img(P, patch_size, stride_size, size(img)[1:3])
