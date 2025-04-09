@@ -199,7 +199,7 @@ begin
 	total_cost = X -> dc_cost(X) + nn_cost(X)
 
 	dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
-	μ = 0.8 / (σ1A^2) # step size for GD
+	μ = 1 / (σ1A^2) # step size for GD
 end;
 
 # ╔═╡ 42644310-01b2-466e-8932-a6f9f242a2d4
@@ -259,7 +259,7 @@ end
 # ╔═╡ 10d74509-432c-4501-9364-d49659694c3d
 ## Plot initial solution
 begin
-	jim(mid3(X0[:,end:-1:1,end:-1:1,frame]); title="|Zero-filled SENSE combination|, R ≈ $(round(R, sigdigits=4)), frame $frame", xlabel=L"x, z", ylabel=L"z, y");
+	jim(mid3(X0[:,end:-1:1,end:-1:1,frame]); title="|Zero-filled recon|, R ≈ $(round(R, sigdigits=4)), frame $frame", xlabel=L"x, z", ylabel=L"z, y");
 end
 
 # ╔═╡ ed316545-49a6-4fa4-9142-8b709a103468

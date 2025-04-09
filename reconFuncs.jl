@@ -145,7 +145,7 @@ Singular Value Soft-Thresholding
 proximal operator to nuclear norm
 
 Inputs:
-X: matrix to be low-rankified via SVST
+X: matrix to be low-rankified via SVST. Complex
 β: threshold hyperparameter
 
 Outputs:
@@ -153,8 +153,8 @@ low-rankified version of X
 """
 function SVST(X::AbstractMatrix, β)
     U,s,V = svd(X)
-    sthresh = @. max(s - β, 0)
-    keep = findall(>(0), sthresh)
+    sthresh = @. max(abs(s) - β, 0) * exp(1im * angle(s))
+    keep = findall(!=(0), sthresh)
     return U[:,keep] * Diagonal(sthresh[keep]) * V[:,keep]'
 end;
 
@@ -185,6 +185,9 @@ function patchSVST(img::AbstractArray, β, patch_size, stride_size)
     @threads for ip = 1:size(P, ndims(P))
         P[:,:,ip] = SVST(P[:,:,ip], β) # can this be done in-place for speed?
     end
+
+    # rescale to unit 2-norm
+    P ./= mapslices(opnorm, P, dims=(1,2))
 
     # revert normalization to preserve inter-patch contrast
     P .*= σ1s
