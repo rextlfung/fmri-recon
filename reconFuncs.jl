@@ -181,7 +181,7 @@ function patchSVST(img::AbstractArray, β, patch_size, stride_size)
     σ1s = mapslices(opnorm, P, dims=(1,2))
     P ./= σ1s
     
-    # low-rankify each patch with probability p
+    # low-rankify each patch
     @threads for ip = 1:size(P, ndims(P))
         P[:,:,ip] = SVST(P[:,:,ip], β) # can this be done in-place for speed?
     end
