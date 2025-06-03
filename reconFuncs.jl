@@ -31,18 +31,18 @@ function img2patches(img::AbstractArray, patch_size, stride_size)
     Nsteps_z = fld(Nz - psz, ssz)
 
     # calculate number of patches to extract
-    Np = (Nsteps_x + 1)*(Nsteps_y + 1)*(Nsteps_z + 1)
+    Np = (Nsteps_x + 1) * (Nsteps_y + 1) * (Nsteps_z + 1)
 
     # preallocate output array to hold extracted patches
-    P = zeros(ComplexF32, (psx*psy*psz, Nt, Np))
+    P = zeros(ComplexF32, (psx * psy * psz, Nt, Np))
 
     # slide through L and extract patches
     ip = 1 # patch counter
     for iz in 0:Nsteps_z
         for iy in 0:Nsteps_y
             for ix in 0:Nsteps_x
-                patch = img[ix*ssx.+(1:psx),iy*ssy.+(1:psy),iz*ssz.+(1:psz),:]
-                P[:,:,ip] = reshape(patch, (psx*psy*psz, Nt))
+                patch = img[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :]
+                P[:, :, ip] = reshape(patch, (psx * psy * psz, Nt))
 
                 ip += 1
             end
@@ -90,10 +90,10 @@ function patches2img(P::AbstractArray, patch_size, stride_size, og_size)
     for iz in 0:Nsteps_z
         for iy in 0:Nsteps_y
             for ix in 0:Nsteps_x
-                patch = reshape(P[:,:,ip], (psx, psy, psz, Nt))
-                img[ix*ssx.+(1:psx),iy*ssy.+(1:psy),iz*ssz.+(1:psz), :] .+= patch
+                patch = reshape(P[:, :, ip], (psx, psy, psz, Nt))
+                img[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :] .+= patch
 
-                Pcount[ix*ssx.+(1:psx),iy*ssy.+(1:psy),iz*ssz.+(1:psz)] .+= 1
+                Pcount[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz)] .+= 1
 
                 ip += 1
             end
@@ -101,7 +101,7 @@ function patches2img(P::AbstractArray, patch_size, stride_size, og_size)
     end
 
     # prevent division by 0 error for voxels uncovered by any patch
-    Pcount[Pcount .== 0] .= 1
+    Pcount[Pcount.==0] .= 1
 
     # Divide each voxel by their number of contributing patches
     img ./= Pcount
@@ -121,21 +121,21 @@ Outputs:
 cost: scalar nuclear norm penalty.
 """
 function patch_nucnorm(P::AbstractArray)
+    @assert ndims(P) == 3 "P should be a 3D tensor (space x time x patch)"
+
     Np = size(P, ndims(P))
     costs = zeros(Np)
 
-    # normalize each patch via division of their 2-norm (leading SV)
-    σ1s = mapslices(opnorm, P, dims=(1,2))
-    P ./= σ1s
-
-    @threads for ip = 1:Np
-        costs[ip] = sum(svdvals(P[:,:,ip]))
+    @threads for ip in 1:Np
+        svs = svdvals(copy(P[:, :, ip]))
+        if svs[1] > 0
+            costs[ip] = sum(svs ./ svs[1])
+        else
+            costs[ip] = 0
+        end
     end
 
-    # revert normalization to preserve inter-patch contrast
-    P .*= σ1s
-
-    return sum(costs)/Np
+    return sum(costs) / Np
 end;
 
 """
@@ -152,10 +152,10 @@ Outputs:
 low-rankified version of X
 """
 function SVST(X::AbstractMatrix, β)
-    U,s,V = svd(X)
+    U, s, V = svd(X)
     sthresh = @. max(abs(s) - β, 0) * exp(1im * angle(s))
     keep = findall(!=(0), sthresh)
-    return U[:,keep] * Diagonal(sthresh[keep]) * V[:,keep]'
+    return U[:, keep] * Diagonal(sthresh[keep]) * V[:, keep]'
 end;
 
 """
@@ -176,21 +176,25 @@ patch-wise low-rankified version of img
 function patchSVST(img::AbstractArray, β, patch_size, stride_size)
     # extract patches
     P = img2patches(img, patch_size, stride_size)
+    Np = size(P, ndims(P))
 
     # normalize each patch via division of their 2-norm (leading SV)
-    σ1s = mapslices(opnorm, P, dims=(1,2))
-    P ./= σ1s
-    
+    σ1s = [opnorm(P[:, :, ip]) for ip in 1:Np]
+    σ1s[σ1s.==0] .= eps() # avoid division by 0
+    P ./= reshape(σ1s, 1, 1, :)
+
     # low-rankify each patch
-    @threads for ip = 1:size(P, ndims(P))
-        P[:,:,ip] = SVST(P[:,:,ip], β) # can this be done in-place for speed?
+    @threads for ip in 1:Np
+        P[:, :, ip] = SVST(P[:, :, ip], β) # can this be done in-place for speed?
     end
 
-    # rescale to unit 2-norm
-    P ./= mapslices(opnorm, P, dims=(1,2))
+    # rescale so leading SV = 1 before reverting normalization
+    σ1s_tmp = [opnorm(P[:, :, ip]) for ip in 1:Np]
+    σ1s_tmp[σ1s_tmp.==0] .= eps() # avoid division by 0
+    P ./= reshape(σ1s_tmp, 1, 1, :)
 
     # revert normalization to preserve inter-patch contrast
-    P .*= σ1s
+    P .*= reshape(σ1s, 1, 1, :)
 
     # recombine patches into image and return
     return patches2img(P, patch_size, stride_size, size(img)[1:3])

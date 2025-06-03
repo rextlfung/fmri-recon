@@ -52,41 +52,29 @@ begin
 	include("testMultithread.jl")
 end;
 
-# ╔═╡ 59d1f766-44ae-4ee6-b4f9-51ddfbbff672
-## Declare and set path and experimental variables
-begin
-	# Path variables. DO NOT EDIT.
-	top_dir = ""
-	ksp_path = ""
-	smaps_path = ""
-	recon_path = ""
-	
-	# Experiment variables. DO NOT EDIT.
-	(Nx, Ny, Nz, Nc, Nt) = (0, 0, 0, 0, 0)
-	(fov_x, fov_y, fov_z) = (0, 0, 0)
-	(Δx, Δy, Δz) = (0, 0, 0)
-	(fov_kx, fov_ky, fov_kz) = (0, 0, 0)
-	(Δkx, Δky, Δkz) = (0, 0 ,0)
-
-	# Set experimental and path variables. Edit this file for your experiment.
-	include("setVars.jl");
-end;
-
-# ╔═╡ 2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
-## Set reconstruction hyperparameters
-begin
-	# Declare hyperparameters here to avoid scope issues
-	λ_L = 0 # weight for nuclear norm penalty term
-	patch_size = [1, 1, 1] # side lengths for cubic patches
-	stride_size = [1, 1, 1]
-
-	# Set them by running external script. EDIT THIS FILE.
-	include("setReconParams.jl")
-end;
-
 # ╔═╡ 61cc2b53-5bde-4671-8efc-8082e804acb1
 ## Import reconstruction helper functions
 include("reconFuncs.jl");
+
+# ╔═╡ 59d1f766-44ae-4ee6-b4f9-51ddfbbff672
+## Declare and set path and experimental variables
+begin
+	## Path variables specific to this machine
+	top_dir = "/mnt/storage/rexfung/20241017fingertap/"; # top directory
+	ksp_path = top_dir * "kdata2x3.mat"; # k-space file
+	smaps_path = top_dir * "smaps.mat"; # sensitivity maps file
+	recon_path = top_dir * "recon/img.mat"; # reconsctruced fMRI file
+	
+	## Experimental parameters
+	(Nx, Ny, Nz, Nc, Nt) = (120, 120, 40, 32, 20) # Tensor size
+	(fov_x, fov_y, fov_z) = (216*Unitful.mm, 216*Unitful.mm, 72*Unitful.mm) # Field of view
+	(Δx, Δy, Δz) = (fov_x, fov_y, fov_z) ./ (Nx, Ny, Nz) # Voxel size
+	(fov_kx, fov_ky, fov_kz) = 2 ./ (Δx, Δy, Δz) # k-space field of view
+	(Δkx, Δky, Δkz) = 2 ./ (fov_x, fov_y, fov_z) # k-space voxel size
+
+	# Set experimental and path variables. Edit this file for your experiment.
+	# include("setVars.jl");
+end;
 
 # ╔═╡ a67436e9-92bd-465a-9f11-45bc350dfafb
 ## Test multithreading
@@ -182,6 +170,19 @@ begin
 	println("Shape of k-space data: ", size(ksp))
 end;
 
+# ╔═╡ 2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
+## Set reconstruction hyperparameters
+begin
+	# Declare hyperparameters here to avoid scope issues
+	λ_L = 5e-2 # weight for nuclear norm penalty term
+	patch_size = [7, 7, 7] # side lengths for cubic patches
+	stride_size = [3, 3, 3]
+	patch_prob = 1 # probability of low-rankifying each patch
+
+	# Set them by running external script. EDIT THIS FILE.
+	# include("setReconParams.jl")
+end;
+
 # ╔═╡ 96180df6-f47e-47e9-bf30-c8db4d0d2d91
 ## Compute Lipschitz constant of MRI forward operator
 begin
@@ -206,10 +207,21 @@ end;
 ## Initialize solution (zero-filled)
 X0 = A' * ksp;
 
+# ╔═╡ 8e99395d-4842-4b45-bf6e-af5a40ee4e7d
+begin
+	patches = img2patches(X0, patch_size, stride_size);
+	ip = 1000;
+	@show any(isnan, patches)
+	@show typeof(patches[:,:,ip])
+	@show eltype(patches[:,:,ip])
+	@show size(patches)
+	@show svdvals(patches[:,:,ip])
+end;
+
 # ╔═╡ 06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
 ## Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
 begin
-	Niters = 20
+	Niters = 10
 	dc_costs = zeros(Niters + 1)
 	nn_costs = zeros(Niters + 1)
 
@@ -217,7 +229,7 @@ begin
 	dc_costs[1] = dc_cost(X)
 	nn_costs[1] = nn_cost(X)
 	
-	for k = 1:Niters
+	for k in 1:Niters
 		if k == 1 # Benchmark first iteration
 			println("Computational metrics:")
 			@showtime X = X - μ * dc_cost_grad(X)
@@ -333,7 +345,6 @@ MIRTjim = "~0.25.0"
 NIfTI = "~0.6.1"
 Plots = "~1.40.9"
 PlutoUI = "~0.7.61"
-Statistics = "~1.11.1"
 StatsBase = "~0.34.4"
 Unitful = "~1.22.0"
 """
@@ -342,9 +353,9 @@ Unitful = "~1.22.0"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.11.4"
+julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "13c80f76a610f6009461db09a71655a1be8a0c01"
+project_hash = "c779455c5f67edcd2d307b929f9f51715b12c05a"
 
 [[deps.AVSfldIO]]
 deps = ["FileIO"]
@@ -1409,7 +1420,7 @@ version = "0.3.27+1"
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
-version = "0.8.1+4"
+version = "0.8.5+0"
 
 [[deps.OpenMPI_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Hwloc_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "MPIPreferences", "TOML", "Zlib_jll"]
@@ -2230,33 +2241,34 @@ version = "1.4.1+2"
 
 # ╔═╡ Cell order:
 # ╠═0b069602-1ccf-49be-8e82-d0b9626a4b2f
-# ╠═a9670567-ce91-4244-bf7a-f7099a34daa6
+# ╟─a9670567-ce91-4244-bf7a-f7099a34daa6
 # ╠═59d1f766-44ae-4ee6-b4f9-51ddfbbff672
-# ╠═a67436e9-92bd-465a-9f11-45bc350dfafb
-# ╠═e98ab10c-8e0a-4fd3-ac1b-b6bd124fe8a4
-# ╠═b7358e00-f2a1-49f1-af7f-a8fdfb6c5483
-# ╠═9561a301-ca5e-4c4b-84ba-7c3768953852
-# ╠═91f9043f-ad49-4c53-8a22-c6051af1a2fd
+# ╟─a67436e9-92bd-465a-9f11-45bc350dfafb
+# ╟─e98ab10c-8e0a-4fd3-ac1b-b6bd124fe8a4
+# ╟─b7358e00-f2a1-49f1-af7f-a8fdfb6c5483
+# ╟─9561a301-ca5e-4c4b-84ba-7c3768953852
+# ╟─91f9043f-ad49-4c53-8a22-c6051af1a2fd
 # ╟─6c069eaa-36ed-4a34-abab-ea5cf2ec3b55
-# ╠═3f7f7869-aeb0-4702-9599-b04748dfa5a5
-# ╠═0d95d0c0-9d6b-4d06-99f4-f4ab2aa9c4b9
-# ╠═05311f6a-80c4-4515-810a-791efb9c21af
-# ╠═e3e01368-771b-46a8-9a76-0ef9b8086db1
-# ╠═6cebc23b-626d-44ac-bdca-b95a6498e6c3
+# ╟─3f7f7869-aeb0-4702-9599-b04748dfa5a5
+# ╟─0d95d0c0-9d6b-4d06-99f4-f4ab2aa9c4b9
+# ╟─05311f6a-80c4-4515-810a-791efb9c21af
+# ╟─e3e01368-771b-46a8-9a76-0ef9b8086db1
+# ╟─6cebc23b-626d-44ac-bdca-b95a6498e6c3
 # ╠═2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
 # ╠═61cc2b53-5bde-4671-8efc-8082e804acb1
-# ╠═96180df6-f47e-47e9-bf30-c8db4d0d2d91
-# ╠═c3d8c3c3-de0f-425d-8489-a6e30b66e12f
-# ╠═42644310-01b2-466e-8932-a6f9f242a2d4
+# ╟─96180df6-f47e-47e9-bf30-c8db4d0d2d91
+# ╟─c3d8c3c3-de0f-425d-8489-a6e30b66e12f
+# ╟─42644310-01b2-466e-8932-a6f9f242a2d4
+# ╠═8e99395d-4842-4b45-bf6e-af5a40ee4e7d
 # ╠═06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
-# ╠═96573a20-dd01-4102-ae8f-c67d55bdecab
-# ╠═4e30390e-3d67-4152-92b8-0d8cfd558041
-# ╠═04345e88-d66e-4995-a1c1-857b15f6edf1
-# ╠═10d74509-432c-4501-9364-d49659694c3d
-# ╠═ed316545-49a6-4fa4-9142-8b709a103468
-# ╠═cc65fbf7-2a5b-47d5-b808-ed6b49382963
-# ╠═f011fdec-c713-469e-8bfd-f105fc25a9f7
-# ╠═64db57d0-d151-4ab7-9a36-08993d70f137
-# ╠═16c5ccbd-2a8f-4af1-9ec4-958c4b15e181
+# ╟─96573a20-dd01-4102-ae8f-c67d55bdecab
+# ╟─4e30390e-3d67-4152-92b8-0d8cfd558041
+# ╟─04345e88-d66e-4995-a1c1-857b15f6edf1
+# ╟─10d74509-432c-4501-9364-d49659694c3d
+# ╟─ed316545-49a6-4fa4-9142-8b709a103468
+# ╟─cc65fbf7-2a5b-47d5-b808-ed6b49382963
+# ╟─f011fdec-c713-469e-8bfd-f105fc25a9f7
+# ╟─64db57d0-d151-4ab7-9a36-08993d70f137
+# ╟─16c5ccbd-2a8f-4af1-9ec4-958c4b15e181
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
