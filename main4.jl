@@ -147,26 +147,37 @@ begin
 end;
 
 # ╔═╡ e3e01368-771b-46a8-9a76-0ef9b8086db1
-## SENSE forward model
+## SENSE forward models, one for each x
 begin
 	# Otazo style MRI forward operator for a single time frame
 	Aotazo = (Ω, smaps) -> Asense(Ω, smaps; fft_forward=true, unitary=true)
 
 	# Encoding matrix for entire time series as block diagonal matrix
-	A = block_diag([Aotazo(s, smaps) for s in eachslice(Ω, dims=ndims(Ω))]...)
+	A = [block_diag([Aotazo(s, smaps[ix,:,:,:]) for s in eachslice(Ω[ix,:,:,:], dims=ndims(Ω[ix,:,:,:]))]...) for ix in 1:Nx]
 
 	# Display input and output dimensions
-	println("Input dimensions: ", A._idim)
-	println("Output dimensions: ", A._odim)
+	println("Input dimensions: ", A[1]._idim)
+	println("Output dimensions: ", A[1]._odim)
 end;
+
+# ╔═╡ c8ca42c4-16b8-4fd1-a764-bfeb1e31875c
+size(ksp0)
 
 # ╔═╡ 6cebc23b-626d-44ac-bdca-b95a6498e6c3
 ## Preprocess k-space data to be in the shape of the odim of A
 begin
-	# Flatten spatial dimensions of k-space data and discard zeros
-	ksp = reshape(ksp0, :, Nc, Nt)
-	ksp = [ksp[vec(s),:,it] for (it,s) in enumerate(eachslice(Ω, dims=4))]
-	ksp = cat(ksp..., dims=3) # (Nsamples, Nc, Nt), no "zeros"
+	# Compute 1D-FFT along x to get hybrid space data
+	ksp = fftshift(ifft(ifftshift(ksp0, [1]), [1]), [1])
+	
+	# Flatten spatial dimensions of k-space data
+	ksp = reshape(ksp, Nx, :, Nc, Nt)
+
+	# Discard zeros by indexing using sampling mask
+	ksp = [ksp[:,vec(omega),:,it] for (it,omega) in enumerate(eachslice(Ω[1,:,:,:], dims=ndims(Ω[1,:,:,:])))]
+
+	# Reconcatenate time dimension to the end
+	ksp = cat(ksp..., dims=4)
+	
 	println("Shape of k-space data: ", size(ksp))
 end;
 
@@ -177,7 +188,6 @@ begin
 	λ_L = 5e-2 # weight for nuclear norm penalty term
 	patch_size = [7, 7, 7] # side lengths for cubic patches
 	stride_size = [3, 3, 3]
-	patch_prob = 1 # probability of low-rankifying each patch
 
 	# Set them by running external script. EDIT THIS FILE.
 	# include("setReconParams.jl")
@@ -195,17 +205,23 @@ end;
 # ╔═╡ c3d8c3c3-de0f-425d-8489-a6e30b66e12f
 ## Define cost functions, gradient, and step size
 begin
-	dc_cost = X -> 0.5 * norm(A * X - ksp)^2
+	dc_cost = X -> 0.5 * sum([norm(A[ix] * X[ix,:,:,:] - ksp[ix,:,:,:])^2 for ix in 1:Nx])
 	nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
 	total_cost = X -> dc_cost(X) + nn_cost(X)
 
-	dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
+	# gradient of data consistency term
+	function dc_cost_grad(X)
+		out = [A[ix]' * (A[ix] * X[ix,:,:,:] - ksp[ix,:,:,:]) for ix in 1:Nx]
+		return permutedims(cat(out..., dims=4), (4, 1, 2, 3))
+	end
 	μ = 1 / (σ1A^2) # step size for GD
 end;
 
 # ╔═╡ 42644310-01b2-466e-8932-a6f9f242a2d4
 ## Initialize solution (zero-filled)
-X0 = A' * ksp;
+begin
+	X0 = permutedims(cat([A[ix]' * ksp[ix,:,:,:] for ix in 1:Nx]..., dims=4), (4, 1, 2, 3))
+end;
 
 # ╔═╡ 8e99395d-4842-4b45-bf6e-af5a40ee4e7d
 begin
@@ -221,7 +237,7 @@ end;
 # ╔═╡ 06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
 ## Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
 begin
-	Niters = 10
+	Niters = 4
 	dc_costs = zeros(Niters + 1)
 	nn_costs = zeros(Niters + 1)
 
@@ -233,10 +249,14 @@ begin
 		if k == 1 # Benchmark first iteration
 			println("Computational metrics:")
 			@showtime X = X - μ * dc_cost_grad(X)
-			@showtime X = patchSVST(X, λ_L, patch_size, stride_size)
+			@showtime for ix in 1:Nx
+				X[ix,:,:,:] = patchSVST2D(X[ix,:,:,:], λ_L, patch_size[2:3], stride_size[2:3])
+			end
 		else
 			X = X - μ * dc_cost_grad(X) # Gradient descent on data-consistency
-			X = patchSVST(X, λ_L, patch_size, stride_size) # "Proximal" operator on nuclear norm
+			for ix in 1:Nx # "Proximal" operator on nuclear norm
+				X[ix,:,:,:] = patchSVST2D(X[ix,:,:,:], λ_L, patch_size[2:3], stride_size[2:3])
+			end
 		end
 
 		# save costs
@@ -2251,14 +2271,15 @@ version = "1.4.1+2"
 # ╟─6c069eaa-36ed-4a34-abab-ea5cf2ec3b55
 # ╟─3f7f7869-aeb0-4702-9599-b04748dfa5a5
 # ╟─0d95d0c0-9d6b-4d06-99f4-f4ab2aa9c4b9
-# ╟─05311f6a-80c4-4515-810a-791efb9c21af
-# ╟─e3e01368-771b-46a8-9a76-0ef9b8086db1
-# ╟─6cebc23b-626d-44ac-bdca-b95a6498e6c3
+# ╠═05311f6a-80c4-4515-810a-791efb9c21af
+# ╠═e3e01368-771b-46a8-9a76-0ef9b8086db1
+# ╠═c8ca42c4-16b8-4fd1-a764-bfeb1e31875c
+# ╠═6cebc23b-626d-44ac-bdca-b95a6498e6c3
 # ╠═2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
 # ╠═61cc2b53-5bde-4671-8efc-8082e804acb1
-# ╟─96180df6-f47e-47e9-bf30-c8db4d0d2d91
-# ╟─c3d8c3c3-de0f-425d-8489-a6e30b66e12f
-# ╟─42644310-01b2-466e-8932-a6f9f242a2d4
+# ╠═96180df6-f47e-47e9-bf30-c8db4d0d2d91
+# ╠═c3d8c3c3-de0f-425d-8489-a6e30b66e12f
+# ╠═42644310-01b2-466e-8932-a6f9f242a2d4
 # ╠═8e99395d-4842-4b45-bf6e-af5a40ee4e7d
 # ╠═06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
 # ╟─96573a20-dd01-4102-ae8f-c67d55bdecab

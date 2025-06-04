@@ -1,0 +1,5 @@
+# What each main file contains
+main.jl: blank template file
+main2.jl: 3D + time recon for 2024/10/17 finger tapping experiment
+main3.jl: 3D + time recon for 2025/05/06 ball phantom experiment
+main4.jl: 2D + time recon for 2024/10/17 finger tapping experiment
