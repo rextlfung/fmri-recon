@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.20.8
+# v0.20.9
 
 using Markdown
 using InteractiveUtils
@@ -60,7 +60,7 @@ include("reconFuncs.jl");
 ## Declare and set path and experimental variables
 begin
 	## Path variables specific to this machine
-	top_dir = "/Users/rexfung/github/data/20241017tap/"; # top directory
+	top_dir = "/mnt/storage/rexfung/20241017tap/"; # top directory
 	ksp_path = top_dir * "kdata2x3.mat"; # k-space file
 	smaps_path = top_dir * "smaps.mat"; # sensitivity maps file
 	recon_path = top_dir * "recon/img.mat"; # reconsctruced fMRI file
@@ -221,7 +221,7 @@ end;
 # ╔═╡ 06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
 ## Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
 begin
-	Niters = 10
+	Niters = 20
 	dc_costs = zeros(Niters + 1)
 	nn_costs = zeros(Niters + 1)
 
@@ -255,15 +255,6 @@ begin
 	plot!(legend=:best)
 end
 
-# ╔═╡ 4e30390e-3d67-4152-92b8-0d8cfd558041
-## Test SVST to make sure it decreases nuclear norm
-# TODO: Write a synthetic test case for nn_cost and patchSVST
-# e.g. construct a dataset with known rank and 
-begin
-	println(nn_cost(X0))
-	println(nn_cost(patchSVST(X0, λ_L, patch_size, stride_size)))
-end
-
 # ╔═╡ 04345e88-d66e-4995-a1c1-857b15f6edf1
 ## Slider for selecting frame
 @bind frame Slider(1:Nt; show_value=true)
@@ -277,7 +268,7 @@ end
 # ╔═╡ ed316545-49a6-4fa4-9142-8b709a103468
 ## Plot final solution
 begin
-	jim(mid3(X[:,end:-1:1,end:-1:1,frame]); title="|Nuclear norm regularized recon|, λ_L = $λ_L, frame $frame", xlabel=L"x, z", ylabel=L"z, y");
+	jim(mid3(X[:,end:-1:1,end:-1:1,frame]); title="|LLR recon|, λ_L = $λ_L, frame $frame", xlabel=L"x, z", ylabel=L"z, y");
 end
 
 # ╔═╡ cc65fbf7-2a5b-47d5-b808-ed6b49382963
@@ -2241,30 +2232,29 @@ version = "1.4.1+2"
 
 # ╔═╡ Cell order:
 # ╠═0b069602-1ccf-49be-8e82-d0b9626a4b2f
-# ╟─a9670567-ce91-4244-bf7a-f7099a34daa6
+# ╠═a9670567-ce91-4244-bf7a-f7099a34daa6
 # ╠═59d1f766-44ae-4ee6-b4f9-51ddfbbff672
-# ╟─a67436e9-92bd-465a-9f11-45bc350dfafb
-# ╟─e98ab10c-8e0a-4fd3-ac1b-b6bd124fe8a4
-# ╟─b7358e00-f2a1-49f1-af7f-a8fdfb6c5483
-# ╟─9561a301-ca5e-4c4b-84ba-7c3768953852
-# ╟─91f9043f-ad49-4c53-8a22-c6051af1a2fd
+# ╠═a67436e9-92bd-465a-9f11-45bc350dfafb
+# ╠═e98ab10c-8e0a-4fd3-ac1b-b6bd124fe8a4
+# ╠═b7358e00-f2a1-49f1-af7f-a8fdfb6c5483
+# ╠═9561a301-ca5e-4c4b-84ba-7c3768953852
+# ╠═91f9043f-ad49-4c53-8a22-c6051af1a2fd
 # ╟─6c069eaa-36ed-4a34-abab-ea5cf2ec3b55
 # ╟─3f7f7869-aeb0-4702-9599-b04748dfa5a5
 # ╟─0d95d0c0-9d6b-4d06-99f4-f4ab2aa9c4b9
-# ╟─05311f6a-80c4-4515-810a-791efb9c21af
-# ╟─e3e01368-771b-46a8-9a76-0ef9b8086db1
-# ╟─6cebc23b-626d-44ac-bdca-b95a6498e6c3
+# ╠═05311f6a-80c4-4515-810a-791efb9c21af
+# ╠═e3e01368-771b-46a8-9a76-0ef9b8086db1
+# ╠═6cebc23b-626d-44ac-bdca-b95a6498e6c3
 # ╠═2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
 # ╠═61cc2b53-5bde-4671-8efc-8082e804acb1
-# ╟─96180df6-f47e-47e9-bf30-c8db4d0d2d91
-# ╟─c3d8c3c3-de0f-425d-8489-a6e30b66e12f
-# ╟─42644310-01b2-466e-8932-a6f9f242a2d4
+# ╠═96180df6-f47e-47e9-bf30-c8db4d0d2d91
+# ╠═c3d8c3c3-de0f-425d-8489-a6e30b66e12f
+# ╠═42644310-01b2-466e-8932-a6f9f242a2d4
 # ╠═8e99395d-4842-4b45-bf6e-af5a40ee4e7d
 # ╠═06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
 # ╟─96573a20-dd01-4102-ae8f-c67d55bdecab
-# ╟─4e30390e-3d67-4152-92b8-0d8cfd558041
 # ╟─04345e88-d66e-4995-a1c1-857b15f6edf1
-# ╠═10d74509-432c-4501-9364-d49659694c3d
+# ╟─10d74509-432c-4501-9364-d49659694c3d
 # ╠═ed316545-49a6-4fa4-9142-8b709a103468
 # ╟─cc65fbf7-2a5b-47d5-b808-ed6b49382963
 # ╟─f011fdec-c713-469e-8bfd-f105fc25a9f7

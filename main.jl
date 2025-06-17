@@ -6,9 +6,13 @@ using InteractiveUtils
 
 # This Pluto notebook uses @bind for interactivity. When running this notebook outside of Pluto, the following 'mock version' of @bind gives bound variables a default value (instead of an error).
 macro bind(def, element)
-    #! format: off
+    #! format: off📂 Step 3: Load Variables Later
     return quote
-        local iv = try Base.loaded_modules[Base.PkgId(Base.UUID("6e696c72-6542-2067-7265-42206c756150"), "AbstractPlutoDingetjes")].Bonds.initial_value catch; b -> missing; end
+        local iv = try
+            Base.loaded_modules[Base.PkgId(Base.UUID("6e696c72-6542-2067-7265-42206c756150"), "AbstractPlutoDingetjes")].Bonds.initial_value
+        catch
+            b -> missing
+        end
         local el = $(esc(element))
         global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : iv(el)
         el
@@ -19,69 +23,70 @@ end
 # ╔═╡ 0b069602-1ccf-49be-8e82-d0b9626a4b2f
 ## Import modules
 begin
-	# Math
-	using LinearAlgebra
-	using FFTW: fft!, ifft!, bfft!, fftshift!
-	using AbstractFFTs
-	using LinearMapsAA: LinearMapAA, block_diag, redim, undim
-	using MIRT: Afft, Asense, embed, pogm_restart, poweriter
+    # Math
+    using LinearAlgebra
+    using FFTW: fft!, ifft!, bfft!, fftshift!
+    using AbstractFFTs
+    using LinearMapsAA: LinearMapAA, block_diag, redim, undim
+    using MIRT: Afft, Asense, embed, pogm_restart, poweriter
 
-	# Probability and statistics
-	using Random: seed!
-	using Statistics, StatsBase
+    # Probability and statistics
+    using Random: seed!
+    using Statistics, StatsBase
 
-	# Parallel computing
-	using Distributed
-	using Base.Threads
-	
-	# Reading/writing files
-	using MAT: matread, matwrite
-	using JLD2, NIfTI, HDF5
+    # Parallel computing
+    using Distributed
+    using Base.Threads
 
-	# Plotting
-	using Plots; cgrad, default(markerstrokecolor=:auto, label="")
-	using MIRTjim: jim, prompt, mid3
+    # Reading/writing files
+    using MAT: matread, matwrite
+    using JLD2, NIfTI, HDF5
 
-	# Readability
-	using Unitful, LaTeXStrings, PlutoUI, Printf
+    # Plotting
+    using Plots
+    cgrad, default(markerstrokecolor=:auto, label="")
+    using MIRTjim: jim, prompt, mid3
+
+    # Readability
+    using Unitful, LaTeXStrings, PlutoUI, Printf
 end;
 
 # ╔═╡ a9670567-ce91-4244-bf7a-f7099a34daa6
 ## Import functions
 begin
-	include("testMultithread.jl")
+    include("testMultithread.jl")
 end;
 
 # ╔═╡ 59d1f766-44ae-4ee6-b4f9-51ddfbbff672
 ## Declare and set path and experimental variables
 begin
-	# Path variables. DO NOT EDIT.
-	top_dir = ""
-	ksp_path = ""
-	smaps_path = ""
-	recon_path = ""
-	
-	# Experiment variables. DO NOT EDIT.
-	(Nx, Ny, Nz, Nc, Nt) = (0, 0, 0, 0, 0)
-	(fov_x, fov_y, fov_z) = (0, 0, 0)
-	(Δx, Δy, Δz) = (0, 0, 0)
-	(fov_kx, fov_ky, fov_kz) = (0, 0, 0)
-	(Δkx, Δky, Δkz) = (0, 0 ,0)
+    # Path variables. DO NOT EDIT.
+    top_dir = ""
+    ksp_path = ""
+    smaps_path = ""
+    recon_path = ""
 
-	# Set experimental and path variables. Edit this file for your experiment.
-	include("setVars.jl");
+    # Experiment variables. DO NOT EDIT.
+    (Nx, Ny, Nz, Nc, Nt) = (0, 0, 0, 0, 0)
+    (fov_x, fov_y, fov_z) = (0, 0, 0)
+    (Δx, Δy, Δz) = (0, 0, 0)
+    (fov_kx, fov_ky, fov_kz) = (0, 0, 0)
+    (Δkx, Δky, Δkz) = (0, 0, 0)
+
+    # Set experimental and path variables. Edit this file for your experiment.
+    include("setVars.jl")
 end;
 
 # ╔═╡ 2fcde12a-4e59-40a2-8ca6-530a1c4a0bb9
 ## Set reconstruction hyperparameters
 begin
-	# Declare hyperparameters here to avoid scope issues
-	λ_L = 0 # weight for nuclear norm penalty term
-	patch_size = [1, 1, 1] # side lengths for cubic patches
-	stride_size = [1, 1, 1]
+    # Declare hyperparameters here to avoid scope issues
+    λ_L = 0 # weight for nuclear norm penalty term
+    patch_size = [1, 1, 1] # side lengths for cubic patches
+    stride_size = [1, 1, 1]
 
-	# Set them by running external script. EDIT THIS FILE.
-	include("setReconParams.jl")
+    # Set them by running external script. EDIT THIS FILE.
+    include("setReconParams.jl")
 end;
 
 # ╔═╡ 61cc2b53-5bde-4671-8efc-8082e804acb1
@@ -91,44 +96,44 @@ include("reconFuncs.jl");
 # ╔═╡ a67436e9-92bd-465a-9f11-45bc350dfafb
 ## Test multithreading
 begin
-	testMultithread(Int(1e6))
+    testMultithread(Int(1e6))
 end;
 
 # ╔═╡ e98ab10c-8e0a-4fd3-ac1b-b6bd124fe8a4
 ## Load in zero-filled k-space data from .mat file
 begin
-	file = h5open(ksp_path, "r") # opne file in read mode
-	ksp0 = file["ksp_zf"][:, :, :, :, 1:Nt]
-	ksp0 = Complex{Float32}[complex(k.real, k.imag) for k in ksp0]
-	ksp0 ./= norm(ksp0)
-	@assert (Nx, Ny, Nz, Nc, Nt) == size(ksp0)
+    file = h5open(ksp_path, "r") # opne file in read mode
+    ksp0 = file["ksp_zf"][:, :, :, :, 1:Nt]
+    ksp0 = Complex{Float32}[complex(k.real, k.imag) for k in ksp0]
+    ksp0 ./= norm(ksp0)
+    @assert (Nx, Ny, Nz, Nc, Nt) == size(ksp0)
 
-	# Make k-space vectors for plotting
-	kx = (-(Nx ÷ 2):(Nx ÷ 2 - 1)) .* Δkx
-	ky = (-(Ny ÷ 2):(Ny ÷ 2 - 1)) .* Δky
-	kz = (-(Nz ÷ 2):(Nz ÷ 2 - 1)) .* Δkz
+    # Make k-space vectors for plotting
+    kx = (-(Nx ÷ 2):(Nx÷2-1)) .* Δkx
+    ky = (-(Ny ÷ 2):(Ny÷2-1)) .* Δky
+    kz = (-(Nz ÷ 2):(Nz÷2-1)) .* Δkz
 end;
 
 # ╔═╡ b7358e00-f2a1-49f1-af7f-a8fdfb6c5483
 ## Infer sampling patterns from zero-filled k-space data
-Ω = (ksp0[:,:,:,1,:] .!= 0);
+Ω = (ksp0[:, :, :, 1, :] .!= 0);
 
 # ╔═╡ 9561a301-ca5e-4c4b-84ba-7c3768953852
 ## Infer accleration/undersampling factor
-R = (Nx*Ny*Nz)/sum(Ω[:,:,:,1])
+R = (Nx * Ny * Nz) / sum(Ω[:, :, :, 1])
 
 # ╔═╡ 91f9043f-ad49-4c53-8a22-c6051af1a2fd
 ## Validate sampling patterns
 begin
-	# 1. All coils have the same sampling pattern
-	for ic in 2:Nc 
-		@assert Ω == (ksp0[:,:,:,ic,:] .!= 0) "Detected a different sampling pattern for coil $ic"
-	end
+    # 1. All coils have the same sampling pattern
+    for ic in 2:Nc
+        @assert Ω == (ksp0[:, :, :, ic, :] .!= 0) "Detected a different sampling pattern for coil $ic"
+    end
 
-	# 2. All time frames acquire the same number of samples
-	for it in 2:Nt
-		@assert sum(Ω[:,:,:,it]) == sum(Ω[:,:,:,it - 1]) "Detected a different number of samples for frame $it"
-	end
+    # 2. All time frames acquire the same number of samples
+    for it in 2:Nt
+        @assert sum(Ω[:, :, :, it]) == sum(Ω[:, :, :, it-1]) "Detected a different number of samples for frame $it"
+    end
 end;
 
 # ╔═╡ 6c069eaa-36ed-4a34-abab-ea5cf2ec3b55
@@ -137,69 +142,69 @@ end;
 
 # ╔═╡ 3f7f7869-aeb0-4702-9599-b04748dfa5a5
 ## Scrubbable plot of dynamic sampling patterns
-jim(Ω[1,:,:,t]; colorbar=:none, title="Sampling patterns for frame $t. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
+jim(Ω[1, :, :, t]; colorbar=:none, title="Sampling patterns for frame $t. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
 
 # ╔═╡ 0d95d0c0-9d6b-4d06-99f4-f4ab2aa9c4b9
 ## Plot cumulative sampling pattern
 begin
-	samp_sum = sum(Ω, dims=4)
-	color = cgrad([:blue, :black, :white], [0, 1/2Nt, 1])
-	jim(samp_sum[1,:,:]; color, clim=(0, Nt), title="Cumulative sampling pattern. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
+    samp_sum = sum(Ω, dims=4)
+    color = cgrad([:blue, :black, :white], [0, 1 / 2Nt, 1])
+    jim(samp_sum[1, :, :]; color, clim=(0, Nt), title="Cumulative sampling pattern. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
 end
 
 # ╔═╡ 05311f6a-80c4-4515-810a-791efb9c21af
 ## Load in sensitivity maps
 begin
-	smaps_raw = matread(smaps_path)["smaps"] # raw coil sensitivity maps
-	
-	# Normalize sensitivity maps along the coil dimension
-	smaps = smaps_raw ./ sqrt.(sum(abs2.(smaps_raw), dims=ndims(smaps_raw)))
-	smaps[isnan.(smaps)] .= 0
-	@assert all(sqrt.(sum(abs2.(smaps), dims=ndims(smaps))) .≈ 1) "Sensitivity maps not normalized"
+    smaps_raw = matread(smaps_path)["smaps"] # raw coil sensitivity maps
+
+    # Normalize sensitivity maps along the coil dimension
+    smaps = smaps_raw ./ sqrt.(sum(abs2.(smaps_raw), dims=ndims(smaps_raw)))
+    smaps[isnan.(smaps)] .= 0
+    @assert all(sqrt.(sum(abs2.(smaps), dims=ndims(smaps))) .≈ 1) "Sensitivity maps not normalized"
 end;
 
 # ╔═╡ e3e01368-771b-46a8-9a76-0ef9b8086db1
 ## SENSE forward model
 begin
-	# Otazo style MRI forward operator for a single time frame
-	Aotazo = (Ω, smaps) -> Asense(Ω, smaps; fft_forward=true, unitary=true)
+    # Otazo style MRI forward operator for a single time frame
+    Aotazo = (Ω, smaps) -> Asense(Ω, smaps; fft_forward=true, unitary=true)
 
-	# Encoding matrix for entire time series as block diagonal matrix
-	A = block_diag([Aotazo(s, smaps) for s in eachslice(Ω, dims=ndims(Ω))]...)
+    # Encoding matrix for entire time series as block diagonal matrix
+    A = block_diag([Aotazo(s, smaps) for s in eachslice(Ω, dims=ndims(Ω))]...)
 
-	# Display input and output dimensions
-	println("Input dimensions: ", A._idim)
-	println("Output dimensions: ", A._odim)
+    # Display input and output dimensions
+    println("Input dimensions: ", A._idim)
+    println("Output dimensions: ", A._odim)
 end;
 
 # ╔═╡ 6cebc23b-626d-44ac-bdca-b95a6498e6c3
 ## Preprocess k-space data to be in the shape of the odim of A
 begin
-	# Flatten spatial dimensions of k-space data and discard zeros
-	ksp = reshape(ksp0, :, Nc, Nt)
-	ksp = [ksp[vec(s),:,it] for (it,s) in enumerate(eachslice(Ω, dims=4))]
-	ksp = cat(ksp..., dims=3) # (Nsamples, Nc, Nt), no "zeros"
-	println("Shape of k-space data: ", size(ksp))
+    # Flatten spatial dimensions of k-space data and discard zeros
+    ksp = reshape(ksp0, :, Nc, Nt)
+    ksp = [ksp[vec(s), :, it] for (it, s) in enumerate(eachslice(Ω, dims=4))]
+    ksp = cat(ksp..., dims=3) # (Nsamples, Nc, Nt), no "zeros"
+    println("Shape of k-space data: ", size(ksp))
 end;
 
 # ╔═╡ 96180df6-f47e-47e9-bf30-c8db4d0d2d91
 ## Compute Lipschitz constant of MRI forward operator
 begin
-	σ1A = 0.9997692 # Computed from last time
-	if !@isdefined σ1A
-	    (_, σ1A) = poweriter(undim(A)) # Compute using power iteration. Takes ~14 mins
-	end
+    σ1A = 0.9997692 # Computed from last time
+    if !@isdefined σ1A
+        (_, σ1A) = poweriter(undim(A)) # Compute using power iteration. Takes ~14 mins
+    end
 end;
 
 # ╔═╡ c3d8c3c3-de0f-425d-8489-a6e30b66e12f
 ## Define cost functions, gradient, and step size
 begin
-	dc_cost = X -> 0.5 * norm(A * X - ksp)^2
-	nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
-	total_cost = X -> dc_cost(X) + nn_cost(X)
+    dc_cost = X -> 0.5 * norm(A * X - ksp)^2
+    nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
+    total_cost = X -> dc_cost(X) + nn_cost(X)
 
-	dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
-	μ = 1 / (σ1A^2) # step size for GD
+    dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
+    μ = 1 / (σ1A^2) # step size for GD
 end;
 
 # ╔═╡ 42644310-01b2-466e-8932-a6f9f242a2d4
@@ -209,47 +214,47 @@ X0 = A' * ksp;
 # ╔═╡ 06977ea4-85a0-4d37-a9f9-a9ae6dcb7184
 ## Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
 begin
-	Niters = 20
-	dc_costs = zeros(Niters + 1)
-	nn_costs = zeros(Niters + 1)
+    Niters = 20
+    dc_costs = zeros(Niters + 1)
+    nn_costs = zeros(Niters + 1)
 
-	X = X0
-	dc_costs[1] = dc_cost(X)
-	nn_costs[1] = nn_cost(X)
-	
-	for k = 1:Niters
-		if k == 1 # Benchmark first iteration
-			println("Computational metrics:")
-			@showtime X = X - μ * dc_cost_grad(X)
-			@showtime X = patchSVST(X, λ_L, patch_size, stride_size)
-		else
-			X = X - μ * dc_cost_grad(X) # Gradient descent on data-consistency
-			X = patchSVST(X, λ_L, patch_size, stride_size) # "Proximal" operator on nuclear norm
-		end
+    X = X0
+    dc_costs[1] = dc_cost(X)
+    nn_costs[1] = nn_cost(X)
 
-		# save costs
-		dc_costs[k + 1] = dc_cost(X)
-		nn_costs[k + 1] = nn_cost(X)
-	end
+    for k = 1:Niters
+        if k == 1 # Benchmark first iteration
+            println("Computational metrics:")
+            @showtime X = X - μ * dc_cost_grad(X)
+            @showtime X = patchSVST(X, λ_L, patch_size, stride_size)
+        else
+            X = X - μ * dc_cost_grad(X) # Gradient descent on data-consistency
+            X = patchSVST(X, λ_L, patch_size, stride_size) # "Proximal" operator on nuclear norm
+        end
+
+        # save costs
+        dc_costs[k+1] = dc_cost(X)
+        nn_costs[k+1] = nn_cost(X)
+    end
 end
 
 # ╔═╡ 96573a20-dd01-4102-ae8f-c67d55bdecab
 ## Plot costs
 begin
-	plot(title="Optimization progress", xlabel="iteration", ylabel="cost")
-	plot!(0:Niters, dc_costs; label="data consistency", marker=:xcross)
-	plot!(0:Niters, nn_costs; label="nuclear norm penalty, λ_L = $λ_L", marker=:xcross)
-	plot!(0:Niters, dc_costs + nn_costs; label="overall cost", marker=:xcross)
-	plot!(legend=:best)
+    plot(title="Optimization progress", xlabel="iteration", ylabel="cost")
+    plot!(0:Niters, dc_costs; label="data consistency", marker=:xcross)
+    plot!(0:Niters, nn_costs; label="nuclear norm penalty, λ_L = $λ_L", marker=:xcross)
+    plot!(0:Niters, dc_costs + nn_costs; label="overall cost", marker=:xcross)
+    plot!(legend=:best)
 end
 
 # ╔═╡ 4e30390e-3d67-4152-92b8-0d8cfd558041
 ## Test SVST to make sure it decreases nuclear norm
 # TODO: Write a synthetic test case for nn_cost and patchSVST
-# e.g. construct a dataset with known rank and 
+# e.g. construct a dataset with known rank and
 begin
-	println(nn_cost(X0))
-	println(nn_cost(patchSVST(X0, λ_L, patch_size, stride_size)))
+    println(nn_cost(X0))
+    println(nn_cost(patchSVST(X0, λ_L, patch_size, stride_size)))
 end
 
 # ╔═╡ 04345e88-d66e-4995-a1c1-857b15f6edf1
@@ -259,43 +264,43 @@ end
 # ╔═╡ 10d74509-432c-4501-9364-d49659694c3d
 ## Plot initial solution
 begin
-	jim(mid3(X0[:,end:-1:1,end:-1:1,frame]); title="|Zero-filled recon|, R ≈ $(round(R, sigdigits=4)), frame $frame", xlabel=L"x, z", ylabel=L"z, y");
+    jim(mid3(X0[:, end:-1:1, end:-1:1, frame]); title="|Zero-filled recon|, R ≈ $(round(R, sigdigits=4)), frame $frame", xlabel=L"x, z", ylabel=L"z, y")
 end
 
 # ╔═╡ ed316545-49a6-4fa4-9142-8b709a103468
 ## Plot final solution
 begin
-	jim(mid3(X[:,end:-1:1,end:-1:1,frame]); title="|Nuclear norm regularized recon|, λ_L = $λ_L, frame $frame", xlabel=L"x, z", ylabel=L"z, y");
+    jim(mid3(X[:, end:-1:1, end:-1:1, frame]); title="|Nuclear norm regularized recon|, λ_L = $λ_L, frame $frame", xlabel=L"x, z", ylabel=L"z, y")
 end
 
 # ╔═╡ cc65fbf7-2a5b-47d5-b808-ed6b49382963
 ## Inspect patches of intitial and final solution
 begin
-	P0 = img2patches(X0, patch_size, stride_size);
-	Opnorms0 = mapslices(opnorm, P0, dims=(1,2))
-	P0 ./= Opnorms0
-	svs0 = mapslices(svdvals, P0, dims=(1,2));
+    P0 = img2patches(X0, patch_size, stride_size)
+    Opnorms0 = mapslices(opnorm, P0, dims=(1, 2))
+    P0 ./= Opnorms0
+    svs0 = mapslices(svdvals, P0, dims=(1, 2))
 
-	P = img2patches(X, patch_size, stride_size);
-	Opnorms = mapslices(opnorm, P, dims=(1,2))
-	P ./= Opnorms
-	svs = mapslices(svdvals, P, dims=(1,2));
+    P = img2patches(X, patch_size, stride_size)
+    Opnorms = mapslices(opnorm, P, dims=(1, 2))
+    P ./= Opnorms
+    svs = mapslices(svdvals, P, dims=(1, 2))
 
-	Np = size(svs,3)
+    Np = size(svs, 3)
 end;
 
 # ╔═╡ f011fdec-c713-469e-8bfd-f105fc25a9f7
 begin
-	plot(title="Average SVs for $Np normalized patches", xlabel="SV index")
-	plot!(1:size(svs0, 1), mean(svs0, dims=3)[:,1,1]; label=L"X_0", marker=:xcross)
-	plot!(1:size(svs, 1), mean(svs, dims=3)[:,1,1]; label=L"X_∞", marker=:xcross)
+    plot(title="Average SVs for $Np normalized patches", xlabel="SV index")
+    plot!(1:size(svs0, 1), mean(svs0, dims=3)[:, 1, 1]; label=L"X_0", marker=:xcross)
+    plot!(1:size(svs, 1), mean(svs, dims=3)[:, 1, 1]; label=L"X_∞", marker=:xcross)
 end
 
 # ╔═╡ 64db57d0-d151-4ab7-9a36-08993d70f137
-histogram(median(svs0, dims=1)[1,1,:], bins=200, title=string("Histogram of median SVs of ", L"X_0", ", Np = $Np"), xlabel="median σ", ylabel="frequency")
+histogram(median(svs0, dims=1)[1, 1, :], bins=200, title=string("Histogram of median SVs of ", L"X_0", ", Np = $Np"), xlabel="median σ", ylabel="frequency")
 
 # ╔═╡ 16c5ccbd-2a8f-4af1-9ec4-958c4b15e181
-histogram(median(svs, dims=1)[1,1,:], bins=200, title=string("Histogram of median SVs of ", L"X_∞", ", Np = $Np"), xlabel="median σ", ylabel="frequency")
+histogram(median(svs, dims=1)[1, 1, :], bins=200, title=string("Histogram of median SVs of ", L"X_∞", ", Np = $Np"), xlabel="median σ", ylabel="frequency")
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """

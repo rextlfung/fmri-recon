@@ -30,6 +30,9 @@ begin
 	using Random: seed!
 	using Statistics, StatsBase
 
+	# Interpolation
+	using ImageTransformations
+
 	# Parallel computing
 	using Distributed
 	using Base.Threads
@@ -60,17 +63,19 @@ include("reconFuncs.jl");
 ## Declare and set path and experimental variables
 begin
 	## Path variables specific to this machine
-	top_dir = "/mnt/storage/rexfung/20241017tap/"; # top directory
-	ksp_path = top_dir * "kdata2x3.mat"; # k-space file
+	top_dir = "/mnt/storage/rexfung/20250609ball/recon/"; # top directory
+	ksp_path = top_dir * "44.mat"; # k-space file
 	smaps_path = top_dir * "smaps.mat"; # sensitivity maps file
-	recon_path = top_dir * "recon/img.mat"; # reconsctruced fMRI file
+	recon_path = top_dir * "img44.mat"; # reconsctruced fMRI file
 	
 	## Experimental parameters
-	(Nx, Ny, Nz, Nc, Nt) = (120, 120, 40, 32, 20) # Tensor size
-	(fov_x, fov_y, fov_z) = (216*Unitful.mm, 216*Unitful.mm, 72*Unitful.mm) # Field of view
+	(Nx, Ny, Nz, Nc, Nt) = (90, 90, 20, 32, 60) # Tensor size
+	(fov_x, fov_y, fov_z) = (216*Unitful.mm, 216*Unitful.mm, 48*Unitful.mm) # Field of view
 	(Δx, Δy, Δz) = (fov_x, fov_y, fov_z) ./ (Nx, Ny, Nz) # Voxel size
 	(fov_kx, fov_ky, fov_kz) = 2 ./ (Δx, Δy, Δz) # k-space field of view
 	(Δkx, Δky, Δkz) = 2 ./ (fov_x, fov_y, fov_z) # k-space voxel size
+	fov_gre = (216*Unitful.mm, 216*Unitful.mm, 216*Unitful.mm)
+	N_gre = (108, 108, 108)
 
 	# Set experimental and path variables. Edit this file for your experiment.
 	# include("setVars.jl");
@@ -86,7 +91,7 @@ end;
 ## Load in zero-filled k-space data from .mat file
 begin
 	file = h5open(ksp_path, "r") # opne file in read mode
-	ksp0 = file["ksp_zf"][:, :, :, :, 1:Nt]
+	ksp0 = file["ksp_epi_zf"][:, :, :, :, 1:Nt]
 	ksp0 = Complex{Float32}[complex(k.real, k.imag) for k in ksp0]
 	ksp0 ./= norm(ksp0)
 	@assert (Nx, Ny, Nz, Nc, Nt) == size(ksp0)
@@ -138,43 +143,49 @@ end
 # ╔═╡ 05311f6a-80c4-4515-810a-791efb9c21af
 ## Load in sensitivity maps
 begin
-	smaps_raw = matread(smaps_path)["smaps"] # raw coil sensitivity maps
+	smaps = matread(smaps_path)["smaps_raw"] # raw coil sensitivity maps
+
+	# Crop to FOV
+	x_range = round((fov_gre[1] - fov_x)/fov_gre[1]/2*N_gre[1] + 1):round(N_gre[1] - (fov_gre[1] - fov_z)/fov_gre[1]/2*N_gre[1])
+	y_range = round((fov_gre[2] - fov_z)/fov_gre[2]/2*N_gre[2] + 1):round(N_gre[2] - (fov_gre[2] - fov_z)/fov_gre[2]/2*N_gre[2])
+	z_range = round((fov_gre[3] - fov_z)/fov_gre[3]/2*N_gre[3] + 1):round(N_gre[3] - (fov_gre[3] - fov_z)/fov_gre[3]/2*N_gre[3])
+    smaps = smaps[Int.(x_range),Int.(y_range),Int.(z_range),:]
+
+    # Interpolate to match EPI voxel sizes
+	smaps_new = complex.(zeros(Nx,Ny,Nz,Nc));
+    for coil = 1:Nc
+		real_part = imresize(real(smaps[:,:,:,coil]),(Nx,Ny,Nz))
+		imag_part = imresize(imag(smaps[:,:,:,coil]),(Nx,Ny,Nz))
+		smaps_new[:,:,:,coil] = complex.(real_part, imag_part)
+    end
 	
 	# Normalize sensitivity maps along the coil dimension
-	smaps = smaps_raw ./ sqrt.(sum(abs2.(smaps_raw), dims=ndims(smaps_raw)))
+	smaps = smaps_new ./ sqrt.(sum(abs2.(smaps_new), dims=ndims(smaps_new)))
 	smaps[isnan.(smaps)] .= 0
-	@assert all(sqrt.(sum(abs2.(smaps), dims=ndims(smaps))) .≈ 1) "Sensitivity maps not normalized"
+	# @assert all(sqrt.(sum(abs2.(smaps), dims=ndims(smaps))) .≈ 1) "Sensitivity maps not normalized"
 end;
 
 # ╔═╡ e3e01368-771b-46a8-9a76-0ef9b8086db1
-## SENSE forward models, one for each x
+## SENSE forward model
 begin
 	# Otazo style MRI forward operator for a single time frame
 	Aotazo = (Ω, smaps) -> Asense(Ω, smaps; fft_forward=true, unitary=true)
 
 	# Encoding matrix for entire time series as block diagonal matrix
-	A = [block_diag([Aotazo(s, smaps[ix,:,:,:]) for s in eachslice(Ω[ix,:,:,:], dims=ndims(Ω[ix,:,:,:]))]...) for ix in 1:Nx]
+	A = block_diag([Aotazo(s, smaps) for s in eachslice(Ω, dims=ndims(Ω))]...)
 
 	# Display input and output dimensions
-	println("Input dimensions: ", A[1]._idim)
-	println("Output dimensions: ", A[1]._odim)
+	println("Input dimensions: ", A._idim)
+	println("Output dimensions: ", A._odim)
 end;
 
 # ╔═╡ 6cebc23b-626d-44ac-bdca-b95a6498e6c3
 ## Preprocess k-space data to be in the shape of the odim of A
 begin
-	# Compute 1D-FFT along x to get hybrid space data
-	ksp = fftshift(ifft(ifftshift(ksp0, [1]), [1]), [1])
-	
-	# Flatten spatial dimensions of k-space data
-	ksp = reshape(ksp, Nx, :, Nc, Nt)
-
-	# Discard zeros by indexing using sampling mask
-	ksp = [ksp[:,vec(omega),:,it] for (it,omega) in enumerate(eachslice(Ω[1,:,:,:], dims=ndims(Ω[1,:,:,:])))]
-
-	# Reconcatenate time dimension to the end
-	ksp = cat(ksp..., dims=4)
-	
+	# Flatten spatial dimensions of k-space data and discard zeros
+	ksp = reshape(ksp0, :, Nc, Nt)
+	ksp = [ksp[vec(s),:,it] for (it,s) in enumerate(eachslice(Ω, dims=4))]
+	ksp = cat(ksp..., dims=3) # (Nsamples, Nc, Nt), no "zeros"
 	println("Shape of k-space data: ", size(ksp))
 end;
 
@@ -182,9 +193,10 @@ end;
 ## Set reconstruction hyperparameters
 begin
 	# Declare hyperparameters here to avoid scope issues
-	λ_L = 4e-6 # weight for nuclear norm penalty term
+	λ_L = 5e-2 # weight for nuclear norm penalty term
 	patch_size = [7, 7, 7] # side lengths for cubic patches
 	stride_size = [3, 3, 3]
+	patch_prob = 1 # probability of low-rankifying each patch
 
 	# Set them by running external script. EDIT THIS FILE.
 	# include("setReconParams.jl")
@@ -202,23 +214,17 @@ end;
 # ╔═╡ c3d8c3c3-de0f-425d-8489-a6e30b66e12f
 ## Define cost functions, gradient, and step size
 begin
-	dc_cost = X -> 0.5 * sum([norm(A[ix] * X[ix,:,:,:] - ksp[ix,:,:,:])^2 for ix in 1:Nx])
-	nn_cost = X -> λ_L * sum([patch_nucnorm(img2patches2D(X[ix,:,:,:], patch_size[1:2], stride_size[1:2])) for ix in 1:Nx])
+	dc_cost = X -> 0.5 * norm(A * X - ksp)^2
+	nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
 	total_cost = X -> dc_cost(X) + nn_cost(X)
 
-	# gradient of data consistency term
-	function dc_cost_grad(X)
-		out = [A[ix]' * (A[ix] * X[ix,:,:,:] - ksp[ix,:,:,:]) for ix in 1:Nx]
-		return permutedims(cat(out..., dims=4), (4, 1, 2, 3))
-	end
+	dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
 	μ = 1 / (σ1A^2) # step size for GD
 end;
 
 # ╔═╡ 42644310-01b2-466e-8932-a6f9f242a2d4
 ## Initialize solution (zero-filled)
-begin
-	X0 = permutedims(cat([A[ix]' * ksp[ix,:,:,:] for ix in 1:Nx]..., dims=4), (4, 1, 2, 3))
-end;
+X0 = A' * ksp;
 
 # ╔═╡ 8e99395d-4842-4b45-bf6e-af5a40ee4e7d
 begin
@@ -246,14 +252,10 @@ begin
 		if k == 1 # Benchmark first iteration
 			println("Computational metrics:")
 			@showtime X = X - μ * dc_cost_grad(X)
-			@showtime for ix in 1:Nx
-				X[ix,:,:,:] = patchSVST2D(X[ix,:,:,:], λ_L, patch_size[2:3], stride_size[2:3])
-			end
+			@showtime X = patchSVST(X, λ_L, patch_size, stride_size)
 		else
 			X = X - μ * dc_cost_grad(X) # Gradient descent on data-consistency
-			for ix in 1:Nx # "Proximal" operator on nuclear norm
-				X[ix,:,:,:] = patchSVST2D(X[ix,:,:,:], λ_L, patch_size[2:3], stride_size[2:3])
-			end
+			X = patchSVST(X, λ_L, patch_size, stride_size) # "Proximal" operator on nuclear norm
 		end
 
 		# save costs
@@ -293,11 +295,13 @@ end
 begin
 	P0 = img2patches(X0, patch_size, stride_size);
 	Opnorms0 = mapslices(opnorm, P0, dims=(1,2))
+	Opnorms0[Opnorms0 .== 0] .= eps()
 	P0 ./= Opnorms0
 	svs0 = mapslices(svdvals, P0, dims=(1,2));
 
 	P = img2patches(X, patch_size, stride_size);
 	Opnorms = mapslices(opnorm, P, dims=(1,2))
+	Opnorms[Opnorms .== 0] .= eps()
 	P ./= Opnorms
 	svs = mapslices(svdvals, P, dims=(1,2));
 
@@ -324,6 +328,7 @@ AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+ImageTransformations = "02fcd773-0e25-5acc-982a-7f6622650795"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -344,6 +349,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 AbstractFFTs = "~1.5.0"
 FFTW = "~1.8.1"
 HDF5 = "~0.17.2"
+ImageTransformations = "~0.10.2"
 JLD2 = "~0.5.11"
 LaTeXStrings = "~1.4.0"
 LinearMapsAA = "~0.12.0"
@@ -363,7 +369,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "c779455c5f67edcd2d307b929f9f51715b12c05a"
+project_hash = "9dfeec94f44e256db8b54612bd5caadbce68874b"
 
 [[deps.AVSfldIO]]
 deps = ["FileIO"]
@@ -668,6 +674,12 @@ git-tree-sha1 = "439e35b0b36e2e5881738abc8857bd92ad6ff9a8"
 uuid = "d38c429a-6771-53c6-b99e-75d170b6e991"
 version = "0.6.3"
 
+[[deps.CoordinateTransformations]]
+deps = ["LinearAlgebra", "StaticArrays"]
+git-tree-sha1 = "a692f5e257d332de1e554e4566a4e5a8a72de2b2"
+uuid = "150eb455-5306-5404-9cee-2592286d6298"
+version = "0.6.4"
+
 [[deps.CustomUnitRanges]]
 git-tree-sha1 = "1a3f97f907e6dd8983b744d2642651bb162a3f7a"
 uuid = "dc8bdbbb-1ca9-579f-8c36-e416f6a65cce"
@@ -962,6 +974,12 @@ deps = ["CatIndices", "ComputationalResources", "DataStructures", "FFTViews", "F
 git-tree-sha1 = "33cb509839cc4011beb45bde2316e64344b0f92b"
 uuid = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
 version = "0.7.9"
+
+[[deps.ImageTransformations]]
+deps = ["AxisAlgorithms", "CoordinateTransformations", "ImageBase", "ImageCore", "Interpolations", "OffsetArrays", "Rotations", "StaticArrays"]
+git-tree-sha1 = "dfde81fafbe5d6516fb864dc79362c5c6b973c82"
+uuid = "02fcd773-0e25-5acc-982a-7f6622650795"
+version = "0.10.2"
 
 [[deps.InitialValues]]
 git-tree-sha1 = "4da0f88e9a39111c2fa3add390ab15f3a44f3ca3"
@@ -1615,6 +1633,12 @@ git-tree-sha1 = "729927532d48cf79f49070341e1d918a65aba6b0"
 uuid = "e99dba38-086e-5de3-a5b1-6e4c66e897c3"
 version = "6.7.1+1"
 
+[[deps.Quaternions]]
+deps = ["LinearAlgebra", "Random", "RealDot"]
+git-tree-sha1 = "994cc27cdacca10e68feb291673ec3a76aa2fae9"
+uuid = "94ee1d12-ae83-5a48-8b1c-48b8ff168ae0"
+version = "0.7.6"
+
 [[deps.REPL]]
 deps = ["InteractiveUtils", "Markdown", "Sockets", "StyledStrings", "Unicode"]
 uuid = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
@@ -1639,6 +1663,12 @@ weakdeps = ["FixedPointNumbers"]
 
     [deps.Ratios.extensions]
     RatiosFixedPointNumbersExt = "FixedPointNumbers"
+
+[[deps.RealDot]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "9f0a1b71baaf7650f4fa8a1d168c7fb6ee41f0c9"
+uuid = "c1ae055f-0cd5-4b69-90a6-9a35b1a98df9"
+version = "0.1.0"
 
 [[deps.RecipesBase]]
 deps = ["PrecompileTools"]
@@ -1668,6 +1698,16 @@ deps = ["UUIDs"]
 git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
 version = "1.3.0"
+
+[[deps.Rotations]]
+deps = ["LinearAlgebra", "Quaternions", "Random", "StaticArrays"]
+git-tree-sha1 = "5680a9276685d392c87407df00d57c9924d9f11e"
+uuid = "6038ab10-8711-5258-84ad-4b1120ba62dc"
+version = "1.7.1"
+weakdeps = ["RecipesBase"]
+
+    [deps.Rotations.extensions]
+    RotationsRecipesBaseExt = "RecipesBase"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"

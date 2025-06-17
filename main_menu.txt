@@ -3,3 +3,8 @@ main.jl: blank template file
 main2.jl: 3D + time recon for 2024/10/17 finger tapping experiment
 main3.jl: 3D + time recon for 2025/05/06 ball phantom experiment
 main4.jl: 2D + time recon for 2024/10/17 finger tapping experiment
+main5.jl: 3D + time recon for 2025/06/09 ball phantom experiment, 6x undersampled, 90x90x60
+main6.jl: 3D + time recon for 2025/06/09 ball phantom experiment, fully sampled, 90x90x20
+main7.jl: 3D + time recon for 2025/06/09 ball phantom experiment, 6x undersampled, 120x120x80. Ditching Pluto notebooks
+main8.jl: 3D + time recon for 2025/06/09 ball phantom experiment, 12x undersampled, 120x120x80.
+main9.jl: 3D + time recon for 2025/06/09 ball phantom experiment, 6x undersampled, 120x120x80. Switching back to using POGM. Added Makie sliders
