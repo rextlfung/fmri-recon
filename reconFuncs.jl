@@ -4,6 +4,7 @@ Collection of functions to be used on iterative image reconstruction.
 
 using Base.Threads
 using LinearAlgebra
+using Statistics
 
 """
 img2patches(img::AbstractArray, patch_size, stride_size)
@@ -174,6 +175,10 @@ Outputs:
 patch-wise low-rankified version of img
 """
 function patchSVST(img::AbstractArray, β, patch_size, stride_size)
+    # Demean images
+    means = mean(img, dims=(1, 2, 3))
+    img .-= means
+
     # extract patches
     P = img2patches(img, patch_size, stride_size)
     Np = size(P, ndims(P))
@@ -196,8 +201,13 @@ function patchSVST(img::AbstractArray, β, patch_size, stride_size)
     # revert normalization to preserve inter-patch contrast
     P .*= reshape(σ1s, 1, 1, :)
 
-    # recombine patches into image and return
-    return patches2img(P, patch_size, stride_size, size(img)[1:3])
+    # recombine patches into image
+    img = patches2img(P, patch_size, stride_size, size(img)[1:3])
+
+    # remean image
+    img .+= means
+
+    return img
 end;
 
 # Functions for 2D x time data
@@ -236,7 +246,7 @@ function img2patches2D(img::AbstractArray, patch_size, stride_size)
     ip = 1
     for iz in 0:Nsteps_z
         for iy in 0:Nsteps_y
-            patch = img[iz*ssz .+ (1:psz), iy*ssy .+ (1:psy), :]
+            patch = img[iz*ssz.+(1:psz), iy*ssy.+(1:psy), :]
             P[:, :, ip] = reshape(patch, (psz * psy, Nt))
             ip += 1
         end
@@ -280,14 +290,14 @@ function patches2img2D(P::AbstractArray, patch_size, stride_size, og_size)
     for iz in 0:Nsteps_z
         for iy in 0:Nsteps_y
             patch = reshape(P[:, :, ip], (psz, psy, Nt))
-            img[iz*ssz .+ (1:psz), iy*ssy .+ (1:psy), :] .+= patch
-            Pcount[iz*ssz .+ (1:psz), iy*ssy .+ (1:psy)] .+= 1
+            img[iz*ssz.+(1:psz), iy*ssy.+(1:psy), :] .+= patch
+            Pcount[iz*ssz.+(1:psz), iy*ssy.+(1:psy)] .+= 1
             ip += 1
         end
     end
 
     # avoid division by zero
-    Pcount[Pcount .== 0] .= 1
+    Pcount[Pcount.==0] .= 1
 
     # normalize by overlap count
     for t in 1:Nt
@@ -319,7 +329,7 @@ function patchSVST2D(img::AbstractArray, β, patch_size, stride_size)
 
     # normalize each patch by dividing by its leading singular value
     σ1s = [opnorm(P[:, :, ip]) for ip in 1:Np]
-    σ1s[σ1s .== 0] .= eps() # avoid division by 0
+    σ1s[σ1s.==0] .= eps() # avoid division by 0
     P ./= reshape(σ1s, 1, 1, :)
 
     # low-rankify each patch using SVST
@@ -329,7 +339,7 @@ function patchSVST2D(img::AbstractArray, β, patch_size, stride_size)
 
     # re-normalize to leading singular value = 1
     σ1s_tmp = [opnorm(P[:, :, ip]) for ip in 1:Np]
-    σ1s_tmp[σ1s_tmp .== 0] .= eps()
+    σ1s_tmp[σ1s_tmp.==0] .= eps()
     P ./= reshape(σ1s_tmp, 1, 1, :)
 
     # scale back to original patch magnitudes

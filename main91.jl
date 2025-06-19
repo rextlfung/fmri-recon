@@ -1,23 +1,19 @@
-# %% Main9.jl
-# Switch to using POGM for speed
+# %% Main91.jl
+# Wrap big compute tasks in functions
 
 # %% Import packages
-# Math
+# Linear algebra
 using LinearAlgebra
-using FFTW: fft!, ifft!, bfft!, fftshift!
-using AbstractFFTs
 using LinearMapsAA: LinearMapAA, block_diag, redim, undim
-using MIRT: Afft, Asense, embed, poweriter
+using MIRT: Asense
 
 # Probability and statistics
-using Random: seed!
 using Statistics, StatsBase
 
 # Interpolation
-using ImageTransformations
+using ImageTransformations: imresize
 
 # Parallel computing
-using Distributed
 using Base.Threads
 
 # Progress
@@ -27,16 +23,16 @@ using ProgressMeter
 using MAT, HDF5
 
 # Plotting
-using GLMakie
-using MIRTjim: jim, prompt, mid3
+using Plots
+using MIRTjim: jim, mid3
 
 # Readability
 using Unitful: mm
-using LaTeXStrings, Printf
+using LaTeXStrings
 
-# %% Include functionss
-include("reconFuncs.jl")
+# %% Local helper functions
 include("testMultithread.jl")
+include("reconFuncs.jl")
 include("mirt_mod.jl")
 
 # %% Declare and set path and experimental variables
@@ -142,8 +138,8 @@ ksp = reshape(ksp0, :, Nc, Nt)
 ksp = [ksp[vec(s), :, it] for (it, s) in enumerate(eachslice(Ω, dims=4))]
 ksp = cat(ksp..., dims=3) # (Nsamples, Nc, Nt), no "zeros"
 println("Shape of k-space data: ", size(ksp))
-ksp0 = nothing
-GC.gc()
+ksp0 = nothing;
+GC.gc();
 
 # %% Set reconstruction hyperparameters
 # Declare hyperparameters here to avoid scope issues
@@ -169,7 +165,7 @@ dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
 X0 = A' * ksp;
 
 # %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-Niters = 20
+Niters = 10
 fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs.mat"
 
 # %%
@@ -205,69 +201,40 @@ else
         ); compress=true)
 end
 
-# %% Plot costs
-# plot(title="Optimization progress", xlabel="iteration", ylabel="cost")
-# plot!(0:Niters, dc_costs; label="data consistency", marker=:xcross)
-# plot!(0:Niters, nn_costs; label="nuclear norm penalty, λ_L = $λ_L", marker=:xcross)
-# plot!(0:Niters, dc_costs + nn_costs; label="overall cost", marker=:xcross)
-# plot!(legend=:best)
+# %% Plot data consistency penalty over iterations
+plot(0:Niters, dc_costs; title="Data consistency penalty", xlabel="iteration", ylabel="cost", marker=:xcross)
 
-fig = Figure()
-ax = Axis(fig[1, 1],
-    title="Optimization progress",
-    xlabel="iteration",
-    ylabel="cost",
-)
-
-iters = 0:Niters
-
-# Lines
-l1 = lines!(ax, iters, dc_costs; label="data consistency", color=:blue)
-s1 = scatter!(ax, iters, dc_costs; marker=:xcross, color=:blue)
-
-l2 = lines!(ax, iters, nn_costs; label="nuclear norm penalty, λ_L = $λ_L", color=:green)
-s2 = scatter!(ax, iters, nn_costs; marker=:xcross, color=:green)
-
-sum_costs = dc_costs .+ nn_costs
-l3 = lines!(ax, iters, sum_costs; label="overall cost", color=:red)
-s3 = scatter!(ax, iters, sum_costs; marker=:xcross, color=:red)
-
-# Only line objects (not scatter) need to be passed to legend
-axislegend(ax, [l1, l2, l3], [l1.label, l2.label, l3.label]; position=:rt)
-
-fig
+# %% Plot regularization penalty over iterations
+plot(0:Niters, nn_costs; title="Regularization penalty", xlabel="iteration", ylabel="cost", marker=:xcross)
 
 # %% Plot initial and final solutions
-fig = Figure(resolution=(900, 400))
+frame = 10
+plot(
+    jim(mid3(X0[:, end:-1:1, end:-1:1, frame]); title="|Zero-filled adjoint|", xlabel=L"x, z", ylabel=L"z, y"),
+    jim(mid3(X[:, end:-1:1, end:-1:1, frame]); title="|LLR recon|, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
+    layout=(1, 2),
+    size=(1500, 650),
+    sgtitle="Frame $frame, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
+)
+# %% Plot initial and final solutions
+frame = 20
+plot(
+    jim(mid3(X0[:, end:-1:1, end:-1:1, frame]); title="|Zero-filled adjoint|", xlabel=L"x, z", ylabel=L"z, y"),
+    jim(mid3(X[:, end:-1:1, end:-1:1, frame]); title="|LLR recon|, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
+    layout=(1, 2),
+    size=(1500, 650),
+    sgtitle="Frame $frame, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
+)
 
-# Axes
-ax1 = Axis(fig[1, 1], title="|Zero-filled adjoint|", xlabel=L"x, z", ylabel=L"y, z")
-ax2 = Axis(fig[1, 2], title="|LLR recon|", xlabel=L"x, z", ylabel=L"y, z")
-
-# Force equal widths for columns 1 and 2
-# fig.grid.columns[1].width = Relative(0.5)
-# fig.grid.columns[2].width = Relative(0.5)
-
-# Slider and title
-slider = Slider(fig[2, 1:2], range=1:Nt, startvalue=1)
-titletext = Label(fig[3, 1:2], "")
-
-# Initial image data (magnitude)
-img0_data = Observable(abs.(mid3(X0[:, end:-1:1, end:-1:1, 1])))
-img_data = Observable(abs.(mid3(X[:, end:-1:1, end:-1:1, 1])))
-
-# Plot images
-image!(ax1, img0_data)
-image!(ax2, img_data)
-
-# Update images and title with slider
-on(slider.value) do t
-    img0_data[] = abs.(mid3(X0[:, end:-1:1, end:-1:1, t]))
-    img_data[] = abs.(mid3(X[:, end:-1:1, end:-1:1, t]))
-    titletext.text = "Frame $t, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
-end
-
-fig
+# %% Plot initial and final solutions
+frame = 30
+plot(
+    jim(mid3(X0[:, end:-1:1, end:-1:1, frame]); title="|Zero-filled adjoint|", xlabel=L"x, z", ylabel=L"z, y"),
+    jim(mid3(X[:, end:-1:1, end:-1:1, frame]); title="|LLR recon|, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
+    layout=(1, 2),
+    size=(1500, 650),
+    sgtitle="Frame $frame, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
+)
 
 # %% Replot sampling mask
 jim(Ω[1, :, :, frame]; colorbar=:none, title="Sampling patterns for frame $frame. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
