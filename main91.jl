@@ -145,8 +145,8 @@ GC.gc();
 
 # %% Set reconstruction hyperparameters
 # Declare hyperparameters here to avoid scope issues
-patch_size = [7, 7, 7] # side lengths for cubic patches
-stride_size = [4, 4, 4] # strides in each direction when sweeping patches
+patch_size = [6, 6, 6] # side lengths for cubic patches
+stride_size = [3, 3, 3] # strides in each direction when sweeping patches
 λ_L = 5e-2 # weight for nuclear norm penalty term
 
 # %% Compute Lipschitz constant of MRI forward operator
@@ -179,11 +179,7 @@ if isfile(fn_recon)
 else
     # Proximal step in the form compatible with pogm
     function g_prox(X, c)
-        # Make each voxel time-series zero-mean
-        avg = mean(X, dims=4)
-        X .-= avg
-
-        return patchSVST(X, λ_L, patch_size, stride_size) .+ avg
+        return patchSVST(X, λ_L, patch_size, stride_size)
     end
 
     # Log data-consistency and regularization costs
