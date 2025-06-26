@@ -38,15 +38,15 @@ include("mirt_mod.jl")
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
 top_dir = "/mnt/storage/rexfung/20250609ball/recon/"; # top directory
-fn_ksp = top_dir * "46.mat"; # k-space file
+fn_ksp = top_dir * "47.mat"; # k-space file
 fn_smaps = top_dir * "smaps.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "img46.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "img47.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
 N = (120, 120, 80) # Spatial tensor size
 Nc = 32 # Number of coils
-Nt = 50 # Number of time points
+Nt = 60 # Number of time points
 FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
@@ -66,7 +66,9 @@ testMultithread()
 
 # %% Load in zero-filled k-space data from .mat file
 f_ksp = h5open(fn_ksp, "r") # opne file in read mode
-ksp0 = f_ksp["ksp_epi_zf"][:, :, :, :, 1:Nt]
+start_frame = 10 # read in data after steady state is reached
+ksp0 = f_ksp["ksp_epi_zf"][:, :, :, :, start_frame:Nt]
+Nt = size(ksp0, 5)
 close(f_ksp)
 ksp0 = Complex{Float32}[complex(k.real, k.imag) for k in ksp0]
 @assert (N[1], N[2], N[3], Nc, Nt) == size(ksp0)
@@ -144,7 +146,7 @@ GC.gc();
 # %% Set reconstruction hyperparameters
 # Declare hyperparameters here to avoid scope issues
 patch_size = [7, 7, 7] # side lengths for cubic patches
-stride_size = [3, 3, 3] # strides in each direction when sweeping patches
+stride_size = [4, 4, 4] # strides in each direction when sweeping patches
 λ_L = 5e-2 # weight for nuclear norm penalty term
 
 # %% Compute Lipschitz constant of MRI forward operator
@@ -176,7 +178,13 @@ if isfile(fn_recon)
     nn_costs = f_img["nn_costs"]
 else
     # Proximal step in the form compatible with pogm
-    g_prox = (X, c) -> patchSVST(X, λ_L, patch_size, stride_size)
+    function g_prox(X, c)
+        # Make each voxel time-series zero-mean
+        avg = mean(X, dims=4)
+        X .-= avg
+
+        return patchSVST(X, λ_L, patch_size, stride_size) .+ avg
+    end
 
     # Log data-consistency and regularization costs
     logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
@@ -216,28 +224,49 @@ plot(
     size=(1500, 650),
     sgtitle="Frame $frame, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
 )
-# %% Plot initial and final solutions
-frame = 20
+# %% Plot time series in the middle of the volume
+plot(abs.(X0[N[1]÷2, N[2]÷2, N[3]÷2, :]), label=L"X_0")
+plot!(abs.(X[N[1]÷2, N[2]÷2, N[3]÷2, :]), label=L"X_∞")
+xlabel!("frame")
+title!("Magnitude time series of voxel ($(N[1]÷2), $(N[2]÷2), $(N[3]÷2))")
+# %% Plot time series in the middle of the volume
+plot(abs.(X0[N[1]÷2+7, N[2]÷2+7, N[3]÷2, :]), label=L"X_0")
+plot!(abs.(X[N[1]÷2+7, N[2]÷2+7, N[3]÷2, :]), label=L"X_∞")
+xlabel!("frame")
+title!("Magnitude time series of voxel ($(N[1]÷2 + 7), $(N[2]÷2 + 7), $(N[3]÷2))")
+
+# %% Plot time series in the edge of the volume (should be pure noise)
+plot(abs.(X0[60, 15, 40, :]), label=L"X_0")
+plot!(abs.(X[60, 15, 40, :]), label=L"X_∞")
+xlabel!("frame")
+title!("Magnitude time series of voxel (60, 15, 40)")
+
+# %% Plot time series in the edge of the volume (should be pure noise)
+plot(abs.(X0[1, 1, 1, :]), label=L"X_0")
+plot!(abs.(X[1, 1, 1, :]), label=L"X_∞")
+xlabel!("frame")
+title!("Magnitude time series of voxel (1, 1, 1)")
+
+# %% Plot temporal mean
+avg_0 = mean(X0, dims=4)
+avg_inf = mean(X, dims=4)
+
 plot(
-    jim(mid3(X0[:, end:-1:1, end:-1:1, frame]); title="|Zero-filled adjoint|", xlabel=L"x, z", ylabel=L"z, y"),
-    jim(mid3(X[:, end:-1:1, end:-1:1, frame]); title="|LLR recon|, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
+    jim(avg_0; title="|Zero-filled adjoint|", xlabel=L"x", ylabel=L"y"),
+    jim(avg_inf; title="|LLR recon|, λ_L = $λ_L", xlabel=L"x", ylabel=L"y"),
     layout=(1, 2),
     size=(1500, 650),
-    sgtitle="Frame $frame, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
+    sgtitle="Temporal mean",
 )
 
-# %% Plot initial and final solutions
-frame = 30
+# %% Plot temporal variance
+var_0 = var(X0, dims=4)
+var_inf = var(X, dims=4)
+
 plot(
-    jim(mid3(X0[:, end:-1:1, end:-1:1, frame]); title="|Zero-filled adjoint|", xlabel=L"x, z", ylabel=L"z, y"),
-    jim(mid3(X[:, end:-1:1, end:-1:1, frame]); title="|LLR recon|, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
+    jim(var_0; title="|Zero-filled adjoint|", xlabel=L"x", ylabel=L"y"),
+    jim(var_inf; title="|LLR recon|, λ_L = $λ_L", xlabel=L"x", ylabel=L"y"),
     layout=(1, 2),
     size=(1500, 650),
-    sgtitle="Frame $frame, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
+    sgtitle="Temporal variance",
 )
-
-# %% Replot sampling mask
-jim(Ω[1, :, :, frame]; colorbar=:none, title="Sampling patterns for frame $frame. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
-
-# %%
-GC.gc()

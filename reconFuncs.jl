@@ -175,10 +175,6 @@ Outputs:
 patch-wise low-rankified version of img
 """
 function patchSVST(img::AbstractArray, β, patch_size, stride_size)
-    # Demean images
-    means = mean(img, dims=(1, 2, 3))
-    img .-= means
-
     # extract patches
     P = img2patches(img, patch_size, stride_size)
     Np = size(P, ndims(P))
@@ -203,9 +199,6 @@ function patchSVST(img::AbstractArray, β, patch_size, stride_size)
 
     # recombine patches into image
     img = patches2img(P, patch_size, stride_size, size(img)[1:3])
-
-    # remean image
-    img .+= means
 
     return img
 end;
