@@ -1,5 +1,7 @@
 # %% Main91.jl
 # Wrap big compute tasks in functions
+using Pkg
+Pkg.activate(".")
 
 # %% Import packages
 # Linear algebra
@@ -24,6 +26,7 @@ using MAT, HDF5
 
 # Plotting
 using Plots
+default(size=(1200,900))
 using MIRTjim: jim, mid3
 
 # Readability
@@ -222,7 +225,7 @@ plot(
     jim(mid3(X0[:, end:-1:1, end:-1:1, frame]); title="|Zero-filled adjoint|", xlabel=L"x, z", ylabel=L"z, y"),
     jim(mid3(X[:, end:-1:1, end:-1:1, frame]); title="|LLR recon|, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
     layout=(1, 2),
-    size=(1500, 650),
+    size=(1800, 900),
     sgtitle="Frame $frame, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
 )
 # %% Plot time series in the middle of the volume
@@ -256,7 +259,7 @@ plot(
     jim(avg_0; title="|Zero-filled adjoint|", xlabel=L"x", ylabel=L"y"),
     jim(avg_inf; title="|LLR recon|, λ_L = $λ_L", xlabel=L"x", ylabel=L"y"),
     layout=(1, 2),
-    size=(1500, 650),
+    size=(1800, 900),
     sgtitle="Temporal mean",
 )
 
@@ -268,6 +271,6 @@ plot(
     jim(var_0; title="|Zero-filled adjoint|", xlabel=L"x", ylabel=L"y"),
     jim(var_inf; title="|LLR recon|, λ_L = $λ_L", xlabel=L"x", ylabel=L"y"),
     layout=(1, 2),
-    size=(1500, 650),
+    size=(1800, 900),
     sgtitle="Temporal variance",
 )
