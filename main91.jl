@@ -38,15 +38,15 @@ include("mirt_mod.jl")
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
 top_dir = "/mnt/storage/rexfung/20250609ball/recon/"; # top directory
-fn_ksp = top_dir * "47.mat"; # k-space file
+fn_ksp = top_dir * "46.mat"; # k-space file
 fn_smaps = top_dir * "smaps.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "img47.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "img46.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
 N = (120, 120, 80) # Spatial tensor size
 Nc = 32 # Number of coils
-Nt = 60 # Number of time points
+Nt = 50 # Number of time points
 FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
@@ -66,7 +66,7 @@ testMultithread()
 
 # %% Load in zero-filled k-space data from .mat file
 f_ksp = h5open(fn_ksp, "r") # opne file in read mode
-start_frame = 10 # read in data after steady state is reached
+start_frame = 6 # read in data after steady state is reached
 ksp0 = f_ksp["ksp_epi_zf"][:, :, :, :, start_frame:Nt]
 Nt = size(ksp0, 5)
 close(f_ksp)
@@ -157,17 +157,16 @@ if !(@isdefined σ1A) || isnothing(σ1A)
 end
 
 # %% Define cost functions, gradient, and step size
-dc_cost = X -> 0.5 * norm(A * X - ksp)^2
+dc_cost = X -> 0.5 * norm(A * X - ksp)^2 / norm(ksp)^2
 nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
 total_cost = X -> dc_cost(X) + nn_cost(X)
-dc_cost_grad = X -> A' * (A * X - ksp) # gradient of data consistency term
-μ = 1 / (σ1A^2) # step size for GD
+dc_cost_grad = X -> A' * (A * X - ksp) / norm(ksp)^2
 
 # %% Initialize solution (zero-filled adjoint solution)
 X0 = A' * ksp;
 
 # %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-Niters = 10
+Niters = 20
 fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs.mat"
 
 # %%
@@ -186,7 +185,7 @@ else
     logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
 
     # Run POGM
-    X, costs = pogm_mod(X0, (x) -> 0, dc_cost_grad, σ1A^2;
+    X, costs = pogm_mod(X0, (x) -> 0, dc_cost_grad, (σ1A / norm(ksp))^2;
         mom=:pogm, niter=Niters, g_prox=g_prox, fun=logger)
 
     # Unpack costs
@@ -205,11 +204,17 @@ else
         ); compress=true)
 end
 
-# %% Plot data consistency penalty over iterations
-plot(0:Niters, dc_costs; title="Data consistency penalty", xlabel="iteration", ylabel="cost", marker=:xcross)
-
-# %% Plot regularization penalty over iterations
-plot(0:Niters, nn_costs; title="Regularization penalty", xlabel="iteration", ylabel="cost", marker=:xcross)
+# %% Plot costs over iterations
+plot(0:Niters, dc_costs;
+    label=L"\frac{1}{2} {||AX - y||}^2 / {||y||}^2",
+    xlabel="iteration", ylabel="cost",
+    marker=:xcross)
+plot!(0:Niters, nn_costs;
+    label=L"\lambda_L \sum_{p = 1}^{Np} {|| \mathcal{P}_p (X) ||}_*",
+    xlabel="iteration", ylabel="cost",
+    marker=:xcross,
+    legend=:outerright)
+title!("Optimization progress")
 
 # %% Plot initial and final solutions
 frame = 10
