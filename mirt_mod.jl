@@ -1,14 +1,16 @@
 #=
-poweriter_mod.jl
-pogm_mod.jl
+Modified MIRT functions from:
 2017-03-31, Donghwan Kim and Jeff Fessler, University of Michigan
+
+Contents:
+1. poweriter_mod.jl
+2. pogm_mod.jl
 
 Modified on 2025-06-17, Rex Fung, University of Michigan
 1. To include progress bars using ProgressMeter
 =#
 
-export pogm_mod
-export poweriter_mod
+export pogm_mod, poweriter_mod
 
 using LinearAlgebra: norm
 using ProgressMeter
@@ -268,7 +270,7 @@ function pogm_mod(
     end # for iter
 
     return ((mom === :pogm) ? xnew : ynew), out
-end # pogm_mod()
+end;
 
 function poweriter_mod(
     A;
@@ -292,4 +294,4 @@ function poweriter_mod(
         x /= norm(x)
     end
     return x, norm(A * x) / norm(x)
-end
+end;
