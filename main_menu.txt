@@ -9,3 +9,4 @@ main7.jl: 3D + time recon for 2025/06/09 ball phantom experiment, 6x undersample
 main8.jl: 3D + time recon for 2025/06/09 ball phantom experiment, 12x undersampled, 120x120x80.
 main9.jl: 3D + time recon for 2025/06/09 ball phantom experiment, 6x undersampled, 120x120x80. Switching back to using POGM. Added Makie sliders
 main91.jl: 3D + time recon for 2025/06/09 ball experiment. Wrapping large compute tasks in dedicated functions for cleaner main script.
+main92.jl: 3D + time recon for 2024/10/17 finger tapping experiment. Small subset of data testing on macbook with 8 GB memory.
