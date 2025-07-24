@@ -193,8 +193,8 @@ function pogm_mod(
             # restart + "gamma" decrease conditions checked later for POGM,
             # unlike PGM, FPGM above
 
-    #    else
-    #        throw("bad mom $mom")
+        else
+            throw("bad mom $mom")
         end
 
         # momentum coefficient "beta"
