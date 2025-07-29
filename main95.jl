@@ -1,5 +1,5 @@
-# %% Main94.jl
-# Cascading/multiscale LLR recon on brain data
+# %% Main95.jl
+# 2-scale LLR recon: Global --> small local
 using Pkg
 Pkg.activate(".")
 
@@ -26,7 +26,7 @@ using MAT, HDF5
 
 # Plotting
 using Plots
-default(size=(1200,900))
+default(size=(2200,1100))
 using MIRTjim: jim, mid3
 
 # Readability
@@ -40,17 +40,17 @@ include("mirt_mod.jl")
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/mnt/storage/rexfung/20241017tap/"; # top directory
-fn_ksp = top_dir * "recon/ksp_epi_zf.mat"; # k-space file
-fn_smaps = top_dir * "recon/smaps.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "recon/img.mat"; # reconsctruced fMRI file
+top_dir = "/mnt/storage/rexfung/20250609ball/recon/"; # top directory
+fn_ksp = top_dir * "46.mat"; # k-space file
+fn_smaps = top_dir * "smaps.mat"; # sensitivity maps file
+fn_recon_base = top_dir * "img46.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
-N = (120, 120, 40) # Spatial tensor size
+N = (120, 120, 80) # Spatial tensor size
 Nc = 10 # Number of virtual coils
-Nt = 280 # Number of time points
-FOV = (216mm, 216mm, 72mm) # Field of view
+Nt = 50 # Number of time points
+FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
 Δk = 2 ./ FOV # k-space voxel size
@@ -164,10 +164,10 @@ dc_cost_grad = X -> A' * (A * X - ksp) / norm(ksp)^2
 X0 = repeat(mean(A' * ksp, dims = 4), outer = [1, 1, 1, Nt]);
 
 # %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-Niters_outer = 10 # Number of outer iterations, each using a different proximal operator
-Niters_inner = 20 # Number of inner iterations, each using the same proximal operator
+Niters_outer = 3 # Number of outer iterations, each using a different proximal operator
+Niters_inner = 8 # Number of inner iterations, each using the same proximal operator
 Niters = Niters_outer * Niters_inner
-fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs.mat"
+fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs_tempAvg.mat"
 
 if isfile(fn_recon)
     f_img = matread(fn_recon)
@@ -175,13 +175,15 @@ if isfile(fn_recon)
     dc_costs = f_img["dc_costs"]
     nn_costs = f_img["nn_costs"]
     λ_L = f_img["lambda_L"]
+    Niters_inner = f_img["Niters_inner"]
+    Niters_outer = f_img["Niters_outer"]
 else
     X = X0
 
     # Set reconstruction hyperparameters
     patch_size = size(X)[1:3] # side lengths for cubic patches
     stride_size = patch_size .÷ 2 # strides in each direction when sweeping patches
-    λ_L = 1e-1 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
+    λ_L = 1e-2 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
 
     # Define first regularizer as global nuclear norm
     nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
@@ -193,8 +195,8 @@ else
     nn_costs[1] = nn_cost(X0)
 
     for k in 1:Niters_outer
-        println("Reconstructing outer iteration $k / $Niters_outer. patch_size = $patch_size, stride = $stride_size")
-
+        println("Reconstructing outer iteration $k / $Niters_outer.
+                patch_size = $patch_size, stride = $stride_size")
         # Redefine nuclear norm
         global nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
 
@@ -203,7 +205,7 @@ else
             return patchSVST(X, λ_L, patch_size, stride_size)
         end
 
-        # Log data-consistency and regularization costs
+        # Log data-consistency and regularization costsq
         logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
 
         # POGM
@@ -218,8 +220,8 @@ else
         end
 
         # Reduce patch size for next outer iteration
-        global patch_size = Int.(round.(patch_size .* 0.8))
-        global stride_size = Int.(round.(patch_size .* 0.5))
+        global patch_size = patch_size .÷ 2
+        global stride_size = patch_size .÷ 2
     end
 
     # Save to file
@@ -227,7 +229,9 @@ else
             "X" => X,
             "dc_costs" => dc_costs,
             "nn_costs" => nn_costs,
-            "lambda_L" => λ_L
+            "lambda_L" => λ_L,
+            "Niters_inner" => Niters_inner,
+            "Niters_outer" => Niters_outer
         ); compress=true)
 end
 
@@ -244,14 +248,17 @@ plot!(0:Niters, nn_costs;
     legend=:best)
 title!("Optimization progress, " * L"λ_L" * " = $λ_L")
 
+# %%
+return
+
 # %% Plot initial and final solutions
 t = 10
 plot(
-    jim(mid3(X0[:, end:-1:1, end:-1:1, t]); title="|Zero-filled adjoint|", xlabel=L"x, z", ylabel=L"z, y"),
-    jim(mid3(X[:, end:-1:1, end:-1:1, t]); title="|LLR recon|, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
+    jim(mid3(X0[:, end:-1:1, end:-1:1, t]); title=L"| X_0 |", xlabel=L"x, z", ylabel=L"z, y"),
+    jim(mid3(X[:, end:-1:1, end:-1:1, t]); title="X_∞, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
     layout=(1, 2),
     size=(1800, 900),
-    sgtitle="Frame $frame, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
+    sgtitle="Frame $t, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
 )
 # %% Plot time series in the middle of the volume
 plot(abs.(X0[N[1]÷2, N[2]÷2, N[3]÷2, :]), label=L"X_0")
@@ -281,10 +288,9 @@ avg_0 = mean(X0, dims=4)
 avg_inf = mean(X, dims=4)
 
 plot(
-    jim(avg_0; title="|Zero-filled adjoint|", xlabel=L"x", ylabel=L"y"),
+    jim(avg_0; title=L"| X_0 |", xlabel=L"x", ylabel=L"y"),
     jim(avg_inf; title="|LLR recon|, λ_L = $λ_L", xlabel=L"x", ylabel=L"y"),
     layout=(1, 2),
-    size=(2200, 1100),   
     sgtitle="Temporal mean",
 )
 
@@ -293,9 +299,8 @@ var_0 = var(X0, dims=4)
 var_inf = var(X, dims=4)
 
 plot(
-    jim(var_0; title="|Zero-filled adjoint|", xlabel=L"x", ylabel=L"y"),
+    jim(var_0; title=L"| X_0 |", xlabel=L"x", ylabel=L"y"),
     jim(var_inf; title="|LLR recon|, λ_L = $λ_L", xlabel=L"x", ylabel=L"y"),
     layout=(1, 2),
-    size=(2200, 1100),
     sgtitle="Temporal variance",
 )

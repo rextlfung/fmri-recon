@@ -199,7 +199,7 @@ else
             return patchSVST(X, λ_L, patch_size, stride_size)
         end
 
-        # Log data-consistency and regularization costs
+        # Log data-consistency and regularization costsq
         logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
 
         # POGM
