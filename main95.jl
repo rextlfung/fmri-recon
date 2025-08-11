@@ -35,8 +35,9 @@ using LaTeXStrings
 
 # %% Local helper functions
 include("testMultithread.jl")
-include("reconFuncs.jl")
 include("mirt_mod.jl")
+include("reconFuncs.jl")
+include("analysis.jl")
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
@@ -164,10 +165,10 @@ dc_cost_grad = X -> A' * (A * X - ksp) / norm(ksp)^2
 X0 = repeat(mean(A' * ksp, dims = 4), outer = [1, 1, 1, Nt]);
 
 # %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-Niters_outer = 3 # Number of outer iterations, each using a different proximal operator
-Niters_inner = 8 # Number of inner iterations, each using the same proximal operator
+Niters_outer = 1 # Number of outer iterations, each using a different proximal operator
+Niters_inner = 20 # Number of inner iterations, each using the same proximal operator
 Niters = Niters_outer * Niters_inner
-fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs_tempAvg.mat"
+fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs.mat"
 
 if isfile(fn_recon)
     f_img = matread(fn_recon)
@@ -181,9 +182,9 @@ else
     X = X0
 
     # Set reconstruction hyperparameters
-    patch_size = size(X)[1:3] # side lengths for cubic patches
+    patch_size = (15, 15, 10) # side lengths for cubic patches
     stride_size = patch_size .÷ 2 # strides in each direction when sweeping patches
-    λ_L = 1e-2 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
+    λ_L = 5e-2 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
 
     # Define first regularizer as global nuclear norm
     nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
@@ -220,7 +221,7 @@ else
         end
 
         # Reduce patch size for next outer iteration
-        global patch_size = patch_size .÷ 2
+        global patch_size = Int.(round.(patch_size .* (1/2)))
         global stride_size = patch_size .÷ 2
     end
 
@@ -236,18 +237,38 @@ else
 end
 
 # %% Plot costs over iterations
-plot(0:Niters, dc_costs;
-    label=L"\frac{1}{2} {||AX - y||}^2 / {||y||}^2",
+p = plot(0:Niters, dc_costs;
+    label=L"\frac{1}{2} \frac{{||\mathcal{A}(X) - Y||}_F^2}{{||Y||}_F^2}",
     xlabel="iteration", ylabel="cost",
     marker=:xcross,
-    size=(2200, 1100))
+    size=(2200, 1100),
+    legendfontsize=16)
 plot!(0:Niters, nn_costs;
-    label=L"\frac{\lambda_L}{N_p} \sum_{p = 1}^{N_p} {|| \mathcal{P}(X)_p ||}_*",
+    label=L"\frac{\lambda_L}{N_p} \sum_{p = 1}^{N_p} \frac{{|| \mathcal{P}(X)_p ||}_*}{{|| \mathcal{P}(X)_p ||}_2}",
+    xlabel="iteration", ylabel="cost",
+    marker=:xcross)
+plot!(0:Niters, dc_costs .+ nn_costs;
+    label="Total cost",
     xlabel="iteration", ylabel="cost",
     marker=:xcross,
-    legend=:best)
-title!("Optimization progress, " * L"λ_L" * " = $λ_L")
+    legend=:outerright)
+xticks!(p, 0:Niters_inner:Niters)
+vline!(0:Niters_inner:Niters, label="", linestyle=:dash, color=:gray)
+hline!([λ_L], color=:red, linestyle=:dash, label=L"λ_L" *" = $λ_L")
+title!("Multiscale LLR optimization progress")
 
+# %% Plot tSNR maps
+tSNR_map = tSNR(X)
+jim(tSNR_map; title="tSNR", xlabel=L"x", ylabel=L"y", color=:inferno)
+
+# %% Plot histogram of tSNRs
+histogram(filter(x -> x > 0, tSNR_map),
+          bins = 100,
+          xlabel = "tSNR",
+          ylabel = "Voxel count",
+          title = "Histogram of tSNR values",
+          color = :blue,
+          alpha = 0.7)
 # %%
 return
 
@@ -282,25 +303,3 @@ plot(abs.(X0[1, 1, 1, :]), label=L"X_0")
 plot!(abs.(X[1, 1, 1, :]), label=L"X_∞")
 xlabel!("frame")
 title!("Magnitude time series of voxel (1, 1, 1)")
-
-# %% Plot temporal mean
-avg_0 = mean(X0, dims=4)
-avg_inf = mean(X, dims=4)
-
-plot(
-    jim(avg_0; title=L"| X_0 |", xlabel=L"x", ylabel=L"y"),
-    jim(avg_inf; title="|LLR recon|, λ_L = $λ_L", xlabel=L"x", ylabel=L"y"),
-    layout=(1, 2),
-    sgtitle="Temporal mean",
-)
-
-# %% Plot temporal variance
-var_0 = var(X0, dims=4)
-var_inf = var(X, dims=4)
-
-plot(
-    jim(var_0; title=L"| X_0 |", xlabel=L"x", ylabel=L"y"),
-    jim(var_inf; title="|LLR recon|, λ_L = $λ_L", xlabel=L"x", ylabel=L"y"),
-    layout=(1, 2),
-    sgtitle="Temporal variance",
-)
