@@ -1,5 +1,5 @@
-# %% Main95.jl
-# 2-scale LLR recon: Global --> small local
+# %% Main96.jl
+# Multiscale LLR. Making script more concise 
 using Pkg
 Pkg.activate(".")
 
@@ -26,7 +26,6 @@ using MAT, HDF5
 
 # Plotting
 using Plots
-default(size=(2200,1100))
 using MIRTjim: jim, mid3
 
 # Readability
@@ -34,7 +33,6 @@ using Unitful: mm
 using LaTeXStrings
 
 # %% Local helper functions
-include("testMultithread.jl")
 include("mirt_mod.jl")
 include("recon.jl")
 include("analysis.jl")
@@ -65,9 +63,6 @@ kx = (-(N[1] ÷ 2):(N[1]÷2-1)) .* Δk[1]
 ky = (-(N[2] ÷ 2):(N[2]÷2-1)) .* Δk[2]
 kz = (-(N[3] ÷ 2):(N[3]÷2-1)) .* Δk[3]
 
-# %% Test multithreading
-testMultithread()
-
 # %% Load in zero-filled k-space data from .mat file
 f_ksp = h5open(fn_ksp, "r") # opne file in read mode
 start_frame = 6 # read in data after steady state is reached
@@ -95,15 +90,6 @@ for it in 2:Nt
     @assert sum(Ω[:, :, :, it]) == sum(Ω[:, :, :, it-1]) "Detected a different number of samples for frame $it"
 end
 
-# %% Plot sampling patterns
-t = 1
-jim(Ω[1, :, :, t]; colorbar=:none, title="Sampling patterns for frame $t. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
-
-# %% Plot cumulative sampling pattern
-samp_sum = sum(Ω, dims=4)
-color = cgrad([:blue, :black, :white], [0, 1 / 2Nt, 1])
-jim(samp_sum[1, :, :]; color, clim=(0, Nt), title="Cumulative sampling pattern. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
-
 # %% Load in sensitivity maps
 smaps = matread(fn_smaps)["smaps_raw"] # raw coil sensitivity maps
 
@@ -125,8 +111,6 @@ end
 smaps = smaps_new ./ sqrt.(sum(abs2.(smaps_new), dims=ndims(smaps_new)))
 smaps[isnan.(smaps)] .= 0
 
-jim(mid3(smaps[:, :, :, Nc÷2]); title="Middle 3 planes of smaps for coil $(Nc ÷ 2)", xlabel=L"x, z", ylabel=L"z, y")
-
 # %% SENSE forward model
 # Otazo style MRI forward operator for a single time frame
 Aotazo = (Ω, smaps) -> Asense(Ω, smaps; fft_forward=true, unitary=true)
@@ -134,35 +118,28 @@ Aotazo = (Ω, smaps) -> Asense(Ω, smaps; fft_forward=true, unitary=true)
 # Encoding matrix for entire time series as block diagonal matrix
 A = block_diag([Aotazo(s, smaps) for s in eachslice(Ω, dims=ndims(Ω))]...)
 
-# Display input and output dimensions
-println("Input dimensions: ", A._idim)
-println("Output dimensions: ", A._odim)
-
 # %% Preprocess k-space data to be in the shape of the odim of A
 # Flatten spatial dimensions of k-space data and discard zeros
 ksp = reshape(ksp0, :, Nc, Nt)
 ksp = [ksp[vec(s), :, it] for (it, s) in enumerate(eachslice(Ω, dims=4))]
 ksp = cat(ksp..., dims=3) # (Nsamples, Nc, Nt), no "zeros"
 println("Shape of k-space data: ", size(ksp))
-ksp0 = nothing;
-GC.gc();
+ksp0 = nothing; GC.gc();
 
 # %% Compute Lipschitz constant of MRI forward operator
 σ1A = nothing
-σ1A = 0.9998373 # Computed from last time
+σ1A = 1 # Approximately
 if !(@isdefined σ1A) || isnothing(σ1A)
-    (_, σ1A) = poweriter_mod(undim(A)) # Compute using power iteration. Takes ~14 mins
+    (_, σ1A) = poweriter_mod(undim(A)) # Compute using power iteration. Takes ~20 mins, converged at itr 125.
 end
 
 # %% Define dc cost and its gradient
 dc_cost = X -> 0.5 * norm(A * X - ksp)^2 / norm(ksp)^2
 dc_cost_grad = X -> A' * (A * X - ksp) / norm(ksp)^2
 
-# %% Initialize solution (zero-filled adjoint solution)
-# X0 = A' * ksp;
-
-# %% Initialize solution as temporal average instead
-X0 = repeat(mean(A' * ksp, dims = 4), outer = [1, 1, 1, Nt]);
+# %% Initialize solution
+# X0 = A' * ksp; # zero-filled
+X0 = repeat(mean(A' * ksp, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 
 # %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
 Niters_outer = 1 # Number of outer iterations, each using a different proximal operator
@@ -179,10 +156,8 @@ if isfile(fn_recon)
     Niters_inner = f_img["Niters_inner"]
     Niters_outer = f_img["Niters_outer"]
 else
-    X = X0
-
     # Set reconstruction hyperparameters
-    patch_size = (15, 15, 10) # side lengths for cubic patches
+    patch_size = (8, 8, 8) # side lengths for cubic patches
     stride_size = patch_size .÷ 2 # strides in each direction when sweeping patches
     λ_L = 5e-2 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
 
@@ -195,22 +170,23 @@ else
     dc_costs[1] = dc_cost(X0)
     nn_costs[1] = nn_cost(X0)
 
+    # Iterate
+    X = X0
     for k in 1:Niters_outer
         println("Reconstructing outer iteration $k / $Niters_outer.
                 patch_size = $patch_size, stride = $stride_size")
-        # Redefine nuclear norm
+        
+        # Redefine nuclear norm and proximal step
         global nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
-
-        # Proximal step in the form compatible with pogm
         function g_prox(X, c)
             return patchSVST(X, λ_L, patch_size, stride_size)
         end
 
-        # Log data-consistency and regularization costsq
+        # Log data-consistency and regularization costs
         logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
 
         # POGM
-        global X, costs = pogm_mod(X, (x) -> 0, dc_cost_grad, (σ1A / norm(ksp))^2;
+        global X, costs = pogm_mod(X, (x) -> 0, dc_cost_grad, (σ1A)^2;
             mom=:pogm, niter=Niters_inner, g_prox=g_prox, fun=logger)
 
         # Save costs
@@ -233,7 +209,7 @@ else
             "lambda_L" => λ_L,
             "Niters_inner" => Niters_inner,
             "Niters_outer" => Niters_outer
-        ); compress=true)
+            ); compress=true)
 end
 
 # %% Plot costs over iterations
@@ -241,7 +217,6 @@ p = plot(0:Niters, dc_costs;
     label=L"\frac{1}{2} \frac{{||\mathcal{A}(X) - Y||}_F^2}{{||Y||}_F^2}",
     xlabel="iteration", ylabel="cost",
     marker=:xcross,
-    size=(2200, 1100),
     legendfontsize=16)
 plot!(0:Niters, nn_costs;
     label=L"\frac{\lambda_L}{N_p} \sum_{p = 1}^{N_p} \frac{{|| \mathcal{P}(X)_p ||}_*}{{|| \mathcal{P}(X)_p ||}_2}",
@@ -255,20 +230,37 @@ plot!(0:Niters, dc_costs .+ nn_costs;
 xticks!(p, 0:Niters_inner:Niters)
 vline!(0:Niters_inner:Niters, label="", linestyle=:dash, color=:gray)
 hline!([λ_L], color=:red, linestyle=:dash, label=L"λ_L" *" = $λ_L")
-title!("Multiscale LLR optimization progress")
+title!("Multiscale LLR optimization progress. R = $(round(R, digits=2)).")
 
 # %% Plot tSNR maps
 tSNR_map = tSNR(X)
-jim(tSNR_map; title="tSNR, mean = ", xlabel=L"x", ylabel=L"y", color=:inferno)
+tSNR_map_masked = filter(x -> x > 0, tSNR_map)
+mean_tSNR = mean(vec(tSNR_map_masked))
+peak_tSNR = maximum(vec(tSNR_map_masked))
+jim(tSNR_map; xlabel=L"x", ylabel=L"y", color=:inferno,
+    title="R = $(round(R, digits=2)). tSNR stats: mean = $(round(mean_tSNR, digits=2)), peak = $(round(peak_tSNR, digits=2))")
 
 # %% Plot histogram of tSNRs
 histogram(filter(x -> x > 0, tSNR_map),
           bins = 100,
           xlabel = "tSNR",
           ylabel = "Voxel count",
-          title = "Histogram of tSNR values")
-# %%
+          title = "R = $(round(R, digits=2)). Histogram of tSNR values, mean = $(round(mean_tSNR, digits=2)), peak = $(round(peak_tSNR, digits=2))")
+
+# %% Optional plots
 return
+
+# %% Sampling patterns
+t = 1
+jim(Ω[1, :, :, t]; colorbar=:none, title="Sampling patterns for frame $t. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
+
+# %% Cumulative sampling pattern
+samp_sum = sum(Ω, dims=4)
+color = cgrad([:blue, :black, :white], [0, 1 / 2Nt, 1])
+jim(samp_sum[1, :, :]; color, clim=(0, Nt), title="Cumulative sampling pattern. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
+
+# %% Sensitivity maps
+jim(mid3(smaps[:, :, :, Nc÷2]); title="Middle 3 planes of smaps for coil $(Nc ÷ 2)", xlabel=L"x, z", ylabel=L"z, y")
 
 # %% Plot initial and final solutions
 t = 10
@@ -279,11 +271,13 @@ plot(
     size=(1800, 900),
     sgtitle="Frame $t, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
 )
+
 # %% Plot time series in the middle of the volume
 plot(abs.(X0[N[1]÷2, N[2]÷2, N[3]÷2, :]), label=L"X_0")
 plot!(abs.(X[N[1]÷2, N[2]÷2, N[3]÷2, :]), label=L"X_∞")
 xlabel!("frame")
 title!("Magnitude time series of voxel ($(N[1]÷2), $(N[2]÷2), $(N[3]÷2))")
+
 # %% Plot time series in the middle of the volume
 plot(abs.(X0[N[1]÷2+7, N[2]÷2+7, N[3]÷2, :]), label=L"X_0")
 plot!(abs.(X[N[1]÷2+7, N[2]÷2+7, N[3]÷2, :]), label=L"X_∞")
