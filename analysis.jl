@@ -11,7 +11,7 @@ tSNR(img::AbstractArray)
 Create tSNR maps on dynamic images.
 
 Inputs:
-img: N-dimensional time series data of size (..., Nt)
+img: N-dimensional complex time series data of size (..., Nt)
 
 Outputs:
 tSNR_map: N-dimensional tSNR map
