@@ -26,6 +26,11 @@ function img2patches(img::AbstractArray, patch_size, stride_size)
     psx, psy, psz = patch_size
     ssx, ssy, ssz = stride_size
 
+    # if patch size exceeds image size, set it to image size
+    psx = min(psx, Nx)
+    psy = min(psy, Ny)
+    psz = min(psz, Nz)
+
     # calculate number of steps in each direction
     Nsteps_x = fld(Nx - psx, ssx)
     Nsteps_y = fld(Ny - psy, ssy)
@@ -74,6 +79,11 @@ function patches2img(P::AbstractArray, patch_size, stride_size, og_size)
     psx, psy, psz = patch_size
     ssx, ssy, ssz = stride_size
     Nx, Ny, Nz = og_size
+    
+    # if patch size exceeds image size, set it to image size
+    psx = min(psx, Nx)
+    psy = min(psy, Ny)
+    psz = min(psz, Nz)
 
     # calculate number of steps in each direction
     Nsteps_x = fld(Nx - psx, ssx)
@@ -113,13 +123,15 @@ end
 """
 patch_nucnorm(P::AbstractArray)
 
-compute the sum of nuclear norm of patches
+compute the sum of nuclear norm of patches.
+each patch is first normalized by its spectral norm.
+final cost is normalized by the number of patches
 
 Inputs:
 P: 3D tensor of (space x time) patch matrices. size = (prod(patch_size), Nt, Np)
 
 Outputs:
-cost: scalar nuclear norm penalty.
+cost: scalar normalized nuclear norm penalty.
 """
 function patch_nucnorm(P::AbstractArray)
     @assert ndims(P) == 3 "P should be a 3D tensor (space x time x patch)"
