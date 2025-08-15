@@ -2,7 +2,6 @@
 Collection of functions for conducting statistical analyses on reconstructued images.
 fMRI stuff
 =#
-
 using Statistics: mean, std
 
 """

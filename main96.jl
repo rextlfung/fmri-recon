@@ -40,15 +40,15 @@ include("analysis.jl")
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
 top_dir = "/mnt/storage/rexfung/20250609ball/recon/"; # top directory
-fn_ksp = top_dir * "46.mat"; # k-space file
+fn_ksp = top_dir * "45.mat"; # k-space file
 fn_smaps = top_dir * "smaps.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "img46.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "img45.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
-N = (120, 120, 80) # Spatial tensor size
+N = (90, 90, 60) # Spatial tensor size
+Nt = 120 # Number of time points
 Nc = 10 # Number of virtual coils
-Nt = 50 # Number of time points
 FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
@@ -65,7 +65,7 @@ kz = (-(N[3] ÷ 2):(N[3]÷2-1)) .* Δk[3]
 
 # %% Load in zero-filled k-space data from .mat file
 f_ksp = h5open(fn_ksp, "r") # opne file in read mode
-start_frame = 6 # read in data after steady state is reached
+start_frame = 11 # read in data after steady state is reached
 ksp0 = f_ksp["ksp_epi_zf"][:, :, :, :, start_frame:Nt]
 Nt = size(ksp0, 5)
 close(f_ksp)
@@ -128,7 +128,7 @@ ksp0 = nothing; GC.gc();
 
 # %% Compute Lipschitz constant of MRI forward operator
 σ1A = nothing
-σ1A = 1 # Approximately
+σ1A = 0.999 # Approximately
 if !(@isdefined σ1A) || isnothing(σ1A)
     (_, σ1A) = poweriter_mod(undim(A)) # Compute using power iteration. Takes ~20 mins, converged at itr 125.
 end
@@ -142,8 +142,8 @@ dc_cost_grad = X -> A' * (A * X - ksp) / norm(ksp)^2
 X0 = repeat(mean(A' * ksp, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 
 # %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-Niters_outer = 1 # Number of outer iterations, each using a different proximal operator
-Niters_inner = 20 # Number of inner iterations, each using the same proximal operator
+Niters_outer = 3 # Number of outer iterations, each using a different proximal operator
+Niters_inner = 5 # Number of inner iterations, each using the same proximal operator
 Niters = Niters_outer * Niters_inner
 fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs.mat"
 
@@ -157,8 +157,8 @@ if isfile(fn_recon)
     Niters_outer = f_img["Niters_outer"]
 else
     # Set reconstruction hyperparameters
-    patch_size = (8, 8, 8) # side lengths for cubic patches
-    stride_size = patch_size .÷ 2 # strides in each direction when sweeping patches
+    patch_size = (16, 16, 16) .* 2^(Niters_outer - 1) # side lengths for cubic patches
+    stride_size = (6, 6, 6) # strides in each direction when sweeping patches
     λ_L = 5e-2 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
 
     # Define first regularizer as global nuclear norm
@@ -186,7 +186,7 @@ else
         logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
 
         # POGM
-        global X, costs = pogm_mod(X, (x) -> 0, dc_cost_grad, (σ1A)^2;
+        global X, costs = pogm_mod(X, (x) -> 0, dc_cost_grad, (σ1A / norm(ksp))^2;
             mom=:pogm, niter=Niters_inner, g_prox=g_prox, fun=logger)
 
         # Save costs
@@ -198,7 +198,6 @@ else
 
         # Reduce patch size for next outer iteration
         global patch_size = Int.(round.(patch_size .* (1/2)))
-        global stride_size = patch_size .÷ 2
     end
 
     # Save to file
@@ -211,6 +210,21 @@ else
             "Niters_outer" => Niters_outer
             ); compress=true)
 end
+
+# %% Plot tSNR maps
+tSNR_map = tSNR(X)
+tSNR_map_masked = filter(x -> x > 0, tSNR_map)
+mean_tSNR = mean(vec(tSNR_map_masked))
+peak_tSNR = maximum(vec(tSNR_map_masked))
+jim(tSNR_map; xlabel=L"x", ylabel=L"y", color=:inferno,
+    title="R = $(round(R, digits=2)). tSNR stats: mean = $(round(mean_tSNR, digits=2)), peak = $(round(peak_tSNR, digits=2))")
+
+# %% Plot histogram of tSNRs
+histogram(filter(x -> x > 0, tSNR_map),
+          bins = 100,
+          xlabel = "tSNR",
+          ylabel = "Voxel count",
+          title = "R = $(round(R, digits=2)). Histogram of tSNR values, mean = $(round(mean_tSNR, digits=2)), peak = $(round(peak_tSNR, digits=2))")
 
 # %% Plot costs over iterations
 p = plot(0:Niters, dc_costs;
@@ -231,21 +245,6 @@ xticks!(p, 0:Niters_inner:Niters)
 vline!(0:Niters_inner:Niters, label="", linestyle=:dash, color=:gray)
 hline!([λ_L], color=:red, linestyle=:dash, label=L"λ_L" *" = $λ_L")
 title!("Multiscale LLR optimization progress. R = $(round(R, digits=2)).")
-
-# %% Plot tSNR maps
-tSNR_map = tSNR(X)
-tSNR_map_masked = filter(x -> x > 0, tSNR_map)
-mean_tSNR = mean(vec(tSNR_map_masked))
-peak_tSNR = maximum(vec(tSNR_map_masked))
-jim(tSNR_map; xlabel=L"x", ylabel=L"y", color=:inferno,
-    title="R = $(round(R, digits=2)). tSNR stats: mean = $(round(mean_tSNR, digits=2)), peak = $(round(peak_tSNR, digits=2))")
-
-# %% Plot histogram of tSNRs
-histogram(filter(x -> x > 0, tSNR_map),
-          bins = 100,
-          xlabel = "tSNR",
-          ylabel = "Voxel count",
-          title = "R = $(round(R, digits=2)). Histogram of tSNR values, mean = $(round(mean_tSNR, digits=2)), peak = $(round(peak_tSNR, digits=2))")
 
 # %% Optional plots
 return
