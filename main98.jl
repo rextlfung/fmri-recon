@@ -1,5 +1,5 @@
-# %% Main96.jl
-# Multiscale LLR. Making script more concise 
+# %% Main98.jl
+# Retrospectively undersampled data from fully-sampled GRE images
 using Pkg
 Pkg.activate(".")
 
@@ -39,17 +39,17 @@ include("analysis.jl")
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/mnt/storage/rexfung/20250609ball/recon/"; # top directory
-fn_ksp = top_dir * "45.mat"; # k-space file
+top_dir = "/mnt/storage/rexfung/20250819retroball/"; # top directory
+fn_ksp = top_dir * "ksp_us_6x.mat"; # k-space file
 fn_smaps = top_dir * "smaps.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "img45.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "recon.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
-N = (90, 90, 60) # Spatial tensor size
-Nt = 120 # Number of time points
+N = (108, 108, 60) # Spatial tensor size
+Nt = 50 # Number of time points
 Nc = 10 # Number of virtual coils
-FOV = (216mm, 216mm, 144mm) # Field of view
+FOV = (216mm, 216mm, 120mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
 Δk = 2 ./ FOV # k-space voxel size
@@ -65,16 +65,15 @@ kz = (-(N[3] ÷ 2):(N[3]÷2-1)) .* Δk[3]
 
 # %% Load in zero-filled k-space data from .mat file
 f_ksp = h5open(fn_ksp, "r") # opne file in read mode
-start_frame = 11 # read in data after steady state is reached
-ksp0 = f_ksp["ksp_epi_zf"][:, :, :, :, start_frame:Nt]
+start_frame = 1 # read in data after steady state is reached
+ksp0 = f_ksp["ksp_us_mc"][:, :, :, :, start_frame:Nt]
 Nt = size(ksp0, 5)
 close(f_ksp)
 ksp0 = Complex{Float32}[complex(k.real, k.imag) for k in ksp0]
 @assert (N[1], N[2], N[3], Nc, Nt) == size(ksp0)
-GC.gc()
 
 # %% Infer sampling patterns from zero-filled k-space data
-Ω = (ksp0[:, :, :, 1, :] .!= 0);
+    Ω = (ksp0[:, :, :, 1, :] .!= 0);
 
 # %% Infer accleration/undersampling factor
 R = prod(N) / sum(Ω[:, :, :, 1])
@@ -124,7 +123,6 @@ ksp = reshape(ksp0, :, Nc, Nt)
 ksp = [ksp[vec(s), :, it] for (it, s) in enumerate(eachslice(Ω, dims=4))]
 ksp = cat(ksp..., dims=3) # (Nsamples, Nc, Nt), no "zeros"
 println("Shape of k-space data: ", size(ksp))
-ksp0 = nothing; GC.gc();
 
 # %% Compute Lipschitz constant of MRI forward operator
 σ1A = nothing
@@ -140,6 +138,9 @@ dc_cost_grad = X -> A' * (A * X - ksp) / norm(ksp)^2
 # %% Initialize solution
 # X0 = A' * ksp; # zero-filled
 X0 = repeat(mean(A' * ksp, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
+# nearest-neighbor interpolated, smaps-weighted IFT recon
+# ksp_nn = nn_viewshare(ksp0)
+# X0 = sense_comb(ksp_nn, smaps)
 
 # %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
 Niters_outer = 3 # Number of outer iterations, each using a different proximal operator
@@ -160,7 +161,7 @@ else
     # Set reconstruction hyperparameters
     patch_size = (16, 16, 16) .* 2^(Niters_outer - 1) # side lengths for cubic patches
     stride_size = (6, 6, 6) # strides in each direction when sweeping patches
-    λ_L = 5e-2 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
+    λ_L = 5e-3 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
 
     # Define first regularizer as global nuclear norm
     nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride_size))
@@ -213,86 +214,3 @@ else
             ); compress=true)
 end
 
-# %% Optional plots
-return
-
-# %% Plot tSNR maps
-tSNR_map = tSNR(X)
-tSNR_map_masked = filter(x -> x > 0, tSNR_map)
-mean_tSNR = mean(vec(tSNR_map_masked))
-peak_tSNR = maximum(vec(tSNR_map_masked))
-jim(tSNR_map; xlabel=L"x", ylabel=L"y", color=:inferno,
-    title="R = $(round(R, digits=2)). tSNR stats: mean = $(round(mean_tSNR, digits=2)), peak = $(round(peak_tSNR, digits=2))")
-
-# %% Plot histogram of tSNRs
-histogram(filter(x -> x > 0, tSNR_map),
-          bins = 100,
-          xlabel = "tSNR",
-          ylabel = "Voxel count",
-          title = "R = $(round(R, digits=2)). Histogram of tSNR values, mean = $(round(mean_tSNR, digits=2)), peak = $(round(peak_tSNR, digits=2))")
-
-# %% Plot costs over iterations
-p = plot(0:Niters, dc_costs;
-    label=L"\frac{1}{2} \frac{{||\mathcal{A}(X) - Y||}_F^2}{{||Y||}_F^2}",
-    xlabel="iteration", ylabel="cost",
-    marker=:xcross,
-    legendfontsize=16)
-plot!(0:Niters, nn_costs;
-    label=L"\frac{\lambda_L}{N_p} \sum_{p = 1}^{N_p} \frac{{|| \mathcal{P}(X)_p ||}_*}{{|| \mathcal{P}(X)_p ||}_2}",
-    xlabel="iteration", ylabel="cost",
-    marker=:xcross)
-plot!(0:Niters, dc_costs .+ nn_costs;
-    label="Total cost",
-    xlabel="iteration", ylabel="cost",
-    marker=:xcross,
-    legend=:outerright)
-xticks!(p, 0:Niters_inner:Niters)
-vline!(0:Niters_inner:Niters, label="", linestyle=:dash, color=:gray)
-hline!([λ_L], color=:red, linestyle=:dash, label=L"λ_L" *" = $λ_L")
-title!("Multiscale LLR optimization progress. R = $(round(R, digits=2)).")
-
-# %% Sampling patterns
-t = 1
-jim(Ω[1, :, :, t]; colorbar=:none, title="Sampling patterns for frame $t. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
-
-# %% Cumulative sampling pattern
-samp_sum = sum(Ω, dims=4)
-color = cgrad([:blue, :black, :white], [0, 1 / 2Nt, 1])
-jim(samp_sum[1, :, :]; color, clim=(0, Nt), title="Cumulative sampling pattern. R ≈ $(round(R, sigdigits=4))", x=ky, xlabel=L"k_y", y=kz, ylabel=L"k_z")
-
-# %% Sensitivity maps
-jim(mid3(smaps[:, :, :, Nc÷2]); title="Middle 3 planes of smaps for coil $(Nc ÷ 2)", xlabel=L"x, z", ylabel=L"z, y")
-
-# %% Plot initial and final solutions
-t = 10
-plot(
-    jim(mid3(X0[:, end:-1:1, end:-1:1, t]); title=L"| X_0 |", xlabel=L"x, z", ylabel=L"z, y"),
-    jim(mid3(X[:, end:-1:1, end:-1:1, t]); title="X_∞, λ_L = $λ_L", xlabel=L"x, z", ylabel=L"z, y"),
-    layout=(1, 2),
-    size=(1800, 900),
-    sgtitle="Frame $t, Nx = $(N[1]), Ny = $(N[2]), Nz = $(N[3]), Nt = $Nt, R ≈ $(round(R, sigdigits=4))"
-)
-
-# %% Plot time series in the middle of the volume
-plot(abs.(X0[N[1]÷2, N[2]÷2, N[3]÷2, :]), label=L"X_0")
-plot!(abs.(X[N[1]÷2, N[2]÷2, N[3]÷2, :]), label=L"X_∞")
-xlabel!("frame")
-title!("Magnitude time series of voxel ($(N[1]÷2), $(N[2]÷2), $(N[3]÷2))")
-
-# %% Plot time series in the middle of the volume
-plot(abs.(X0[N[1]÷2+7, N[2]÷2+7, N[3]÷2, :]), label=L"X_0")
-plot!(abs.(X[N[1]÷2+7, N[2]÷2+7, N[3]÷2, :]), label=L"X_∞")
-xlabel!("frame")
-title!("Magnitude time series of voxel ($(N[1]÷2 + 7), $(N[2]÷2 + 7), $(N[3]÷2))")
-
-# %% Plot time series in the edge of the volume (should be pure noise)
-plot(abs.(X0[60, 15, 40, :]), label=L"X_0")
-plot!(abs.(X[60, 15, 40, :]), label=L"X_∞")
-xlabel!("frame")
-title!("Magnitude time series of voxel (60, 15, 40)")
-
-# %% Plot time series in the edge of the volume (should be pure noise)
-plot(abs.(X0[1, 1, 1, :]), label=L"X_0")
-plot!(abs.(X[1, 1, 1, :]), label=L"X_∞")
-xlabel!("frame")
-title!("Magnitude time series of voxel (1, 1, 1)")

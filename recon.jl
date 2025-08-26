@@ -5,6 +5,7 @@ Collection of functions to be used on iterative image reconstruction.
 using Base.Threads
 using LinearAlgebra
 using Statistics
+using FFTW
 
 """
 img2patches(img::AbstractArray, patch_size, stride_size)
@@ -215,7 +216,59 @@ function patchSVST(img::AbstractArray, β, patch_size, stride_size)
     return img
 end;
 
-# Functions for 2D x time data
+"""
+nn_viewshare(ksp::AbstractArray)
+
+perform nearest-neighbor interpolation along the time dimension for each k-space location
+unsampled k-space locations remain zero
+
+Inputs:
+ksp: 3D k-space multi-coil time series of size (Nx, Ny, Nz, Nc, Nt)
+
+Outputs:
+ksp_nn: nearest-neighbor interpolated 3D k-space multi-coil time series of size (Nx, Ny, Nz, Nc, Nt)
+"""
+function nn_viewshare(ksp::AbstractArray)
+    (Nx, Ny, Nz, Nc, Nt) = size(ksp)
+    ksp_nn = zero.(ksp)
+    new_grid = 1:Nt
+    for i in 1:Nx, j in 1:Ny, k in 1:Nz
+        k_vec = ksp[i,j,k,:,:]
+        old_grid = findall(!iszero, k_vec[1,:])
+        if isempty(old_grid)
+            continue
+        end
+        idxs = [argmin(abs.(old_grid .- loc)) for loc in new_grid]
+        ksp_nn[i,j,k,:,:] = k_vec[:, idxs]
+    end
+    return ksp_nn
+end
+
+"""
+sense_comb(ksp::AbstractArray, smaps::AbstractArray)
+
+perform sensitivity map weighted IFT recon
+used for initializing X0
+
+Inputs:
+ksp: 3D k-space multi-coil time series of size (Nx, Ny, Nz, Nc, Nt)
+
+Outputs:
+img: nearest-neighbor interpolated 3D k-space multi-coil time series of size (Nx, Ny, Nz, Nt)
+"""
+function sense_comb(ksp::AbstractArray, smaps::AbstractArray)
+    (Nx, Ny, Nz, Nc, Nt) = size(ksp)
+    img = zeros(eltype(ksp), Nx, Ny, Nz, Nt)
+
+    img_mc = fftshift(ifft(ifftshift(ksp), (1, 2, 3))) # 3D IFT
+    for t in 1:Nt
+        numerator = sum(conj.(smaps) .* img_mc[:,:,:,:,t], dims=4)
+        denominator = sum(abs2.(smaps), dims=4) .+ eps()
+        img[:,:,:,t] = dropdims(numerator ./ denominator; dims=4)
+    end
+    return img
+end
+# %% Functions for 2D x time data
 
 """
 img2patches2D(img::AbstractArray, patch_size, stride_size)
