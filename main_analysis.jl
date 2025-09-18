@@ -15,7 +15,7 @@ using LaTeXStrings
 include("analysis.jl")
 
 # %% Read in recon
-fn_recon = "/mnt/storage/rexfung/20250609ball/recon/img47_50itrs_5e-2.mat"
+fn_recon = "/mnt/storage/rexfung/20250609ball/recon/img47_70itrs.mat"
 f_img = matread(fn_recon)
 X = f_img["X"]
 R = f_img["R"]

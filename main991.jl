@@ -1,5 +1,5 @@
-# %% Main99.jl
-# Non-overlapping, multiscale patches
+# %% Main991.jl
+# Non-overlapping, multiscale patches. Brain data
 using Pkg
 Pkg.activate(".")
 
@@ -39,18 +39,18 @@ include("analysis.jl")
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/mnt/storage/rexfung/20250609ball/recon/"; # top directory
-fn_ksp = top_dir * "47.mat"; # k-space file
-fn_smaps = top_dir * "smaps.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "img47.mat"; # reconsctruced fMRI file
+top_dir = "/mnt/storage/rexfung/20241017tap/"; # top directory
+fn_ksp = top_dir * "recon/ksp_epi_zf.mat"; # k-space file
+fn_smaps = top_dir * "recon/smaps.mat"; # sensitivity maps file
+fn_recon_base = top_dir * "recon/img.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
-N = (120, 120, 80) # Spatial tensor size
+N = (120, 120, 40) # Spatial tensor size
 Nc = 10 # Number of virtual coils
-Nt = 100 # Number of time points
+Nt = 130 # Number of time points
 start_frame = 11 # read in data after steady state is reached
-FOV = (216mm, 216mm, 144mm) # Field of view
+FOV = (216mm, 216mm, 72mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
 Δk = 2 ./ FOV # k-space voxel size
@@ -143,7 +143,7 @@ X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 # X0 = sense_comb(ksp_nn, smaps)
 
 # %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-Niters_outer = 7 # Number of outer iterations, each using a different proximal operator
+Niters_outer = 5 # Number of outer iterations, each using a different proximal operator
 Niters_inner = 10 # Number of inner iterations, each using the same proximal operator
 Niters = Niters_outer * Niters_inner
 fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs.mat"
@@ -154,12 +154,10 @@ patch_sizes = [[120, 120, 80],
                [60, 60, 40],
                [30, 30, 20],
                [15, 15, 10],
-               [6, 6, 4],
-               [3, 3, 2],
-               [1, 1, 1]]
+               [6, 6, 4]]
 strides = patch_sizes # non-overlapping patches
 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
-λ_L = 5e-2
+λ_L = 5e-3
 
 # Define first regularizer as global nuclear norm
 nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_sizes[1], strides[1]))
