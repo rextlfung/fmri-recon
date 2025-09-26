@@ -40,9 +40,9 @@ include("analysis.jl")
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
 top_dir = "/mnt/storage/rexfung/20250902sim/"; # top directory
-fn_ksp = top_dir * "ksp_zf_caipi_comp.mat"; # k-space file
+fn_ksp = top_dir * "ksp_zf.mat"; # k-space file
 fn_smaps = top_dir * "smaps_slice.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "caipi_comp/rec_llr.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "recon/tmp/rec_llr.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
@@ -142,72 +142,74 @@ X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 # ksp_nn = nn_viewshare(ksp0)
 # X0 = sense_comb(ksp_nn, smaps)
 
-# %% Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-Niters_outer = 5 # Number of outer iterations, each using a different proximal operator
-Niters_inner = 10 # Number of inner iterations, each using the same proximal operator
-Niters = Niters_outer * Niters_inner
+# %% Recon for a variety of hyperparameters
+for n in 2:5
+    # Set reconstruction hyperparameters for each scale
+    # side lengths for cubic patches
+    patch_sizes = [[1, 90, 90],
+                [1, 45, 45],
+                [1, 30, 30],
+                [1, 15, 15],
+                [1, 10, 10]]
+    strides = patch_sizes # non-overlapping patches
+    # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
+    λ_L = 10.0^-n
 
-# Set reconstruction hyperparameters for each scale
-# side lengths for cubic patches
-patch_sizes = [[1, 90, 90],
-               [1, 45, 45],
-               [1, 30, 30],
-               [1, 15, 15],
-               [1, 10, 10]]
-strides = patch_sizes # non-overlapping patches
-# weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
-λ_L = 5e-5
+    Niters_outer = 5 # Number of outer iterations, each using a different proximal operator
+    Niters_inner = 10 # Number of inner iterations, each using the same proximal operator
+    Niters = Niters_outer * Niters_inner
 
-# Define first regularizer as global nuclear norm
-nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_sizes[1], strides[1]))
+    # Define first regularizer as global nuclear norm
+    nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_sizes[1], strides[1]))
 
-# Compute initial cost
-dc_costs = zeros(Niters+1)
-nn_costs = zeros(Niters+1)
-dc_costs[1] = dc_cost(X0)
-nn_costs[1] = nn_cost(X0)
+    # Compute initial cost
+    dc_costs = zeros(Niters+1)
+    nn_costs = zeros(Niters+1)
+    dc_costs[1] = dc_cost(X0)
+    nn_costs[1] = nn_cost(X0)
 
-# Iterate
-X = X0
-for k in 1:Niters_outer
-    # read in parameters for the current scale
-    patch_size = patch_sizes[k]
-    stride = strides[k]
+    # Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
+    X = X0
+    for k in 1:Niters_outer
+        # read in parameters for the current scale
+        patch_size = patch_sizes[k]
+        stride = strides[k]
 
-    println("Reconstructing outer iteration $k / $Niters_outer.
-            patch_size = $patch_size, stride = $stride")
-    
-    # Redefine nuclear norm and proximal step
-    global nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride))
-    function g_prox(X, c)
-        return patchSVST(X, λ_L, patch_size, stride)
+        println("Reconstructing outer iteration $k / $Niters_outer.
+                patch_size = $patch_size, stride = $stride")
+        
+        # Redefine nuclear norm and proximal step
+        nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride))
+        function g_prox(X, c)
+            return patchSVST(X, λ_L, patch_size, stride)
+        end
+
+        # Log data-consistency and regularization costs
+        logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
+
+        # POGM
+        X, costs = pogm_mod(X, (x) -> 0, dc_cost_grad, (σ1A / norm(ksp))^2;
+            mom=:pogm, niter=Niters_inner, g_prox=g_prox, fun=logger)
+
+        # Save costs
+        iter_range = 1 .+ ((1 + (k-1)*Niters_inner):k*Niters_inner)
+        for l in 1:Niters_inner
+            dc_costs[iter_range[l]] = costs[1 + l][1]
+            nn_costs[iter_range[l]] = costs[1 + l][2]
+        end
     end
 
-    # Log data-consistency and regularization costs
-    logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
-
-    # POGM
-    global X, costs = pogm_mod(X, (x) -> 0, dc_cost_grad, (σ1A / norm(ksp))^2;
-        mom=:pogm, niter=Niters_inner, g_prox=g_prox, fun=logger)
-
-    # Save costs
-    iter_range = 1 .+ ((1 + (k-1)*Niters_inner):k*Niters_inner)
-    for l in 1:Niters_inner
-        global dc_costs[iter_range[l]] = costs[1 + l][1]
-        global nn_costs[iter_range[l]] = costs[1 + l][2]
-    end
+    # Save to file
+    fn_recon = fn_recon_base[1:end-4] * "_$(λ_L).mat"
+    matwrite(fn_recon, Dict(
+            "X" => X,
+            "R" => R,
+            "dc_costs" => dc_costs,
+            "nn_costs" => nn_costs,
+            "Niters_outer" => Niters_outer,
+            "Niters_inner" => Niters_inner,
+            "lambda_L" => λ_L,
+            "patch_sizes" => patch_sizes,
+            "strides" => strides
+            ); compress=true)
 end
-
-# Save to file
-fn_recon = fn_recon_base[1:end-4] * "_$(λ_L).mat"
-matwrite(fn_recon, Dict(
-        "X" => X,
-        "R" => R,
-        "dc_costs" => dc_costs,
-        "nn_costs" => nn_costs,
-        "Niters_outer" => Niters_outer,
-        "Niters_inner" => Niters_inner,
-        "lambda_L" => λ_L,
-        "patch_sizes" => patch_sizes,
-        "strides" => strides
-        ); compress=true)
