@@ -1,5 +1,5 @@
 # %% Main992.jl
-# Synethetic task fMRI data over resting state brain data.
+# Prospectively undersampled ball phantom data
 using Pkg
 Pkg.activate(".")
 
@@ -39,25 +39,25 @@ include("analysis.jl")
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/mnt/storage/rexfung/20250902sim/"; # top directory
-fn_ksp = top_dir * "ksp_zf.mat"; # k-space file
-fn_smaps = top_dir * "smaps_slice.mat"; # sensitivity maps file
+top_dir = "/mnt/storage/rexfung/20250926ball/"; # top directory
+fn_ksp = top_dir * "recon/ksp6x_100.mat"; # k-space file
+fn_smaps = top_dir * "recon/smaps.mat"; # sensitivity maps file
 fn_recon_base = top_dir * "recon/tmp/rec_llr.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
-N = (1, 90, 90) # Spatial tensor size
-Nc = 32 # Number of virtual coils
-Nt = 380 # Number of time points
-start_frame = 1 # read in data after steady state is reached
-FOV = (2.4mm, 216mm, 216mm) # Field of view
+N = (90, 90, 60) # Spatial tensor size
+Nc = 10 # Number of virtual coils
+Nt = 100 # Number of time points
+start_frame = 6 # read in data after steady state is reached
+FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
 Δk = 2 ./ FOV # k-space voxel size
 
 # GRE parameters
-N_gre = (1, 90, 90) # GRE image tensor size
-FOV_gre = (2.4mm, 216mm, 216mm)
+N_gre = (108, 108, 108) # GRE image tensor size
+FOV_gre = (216mm, 216mm, 216mm)
 
 # %% Make k-space vectors for plotting
 kx = (-(N[1] ÷ 2):(N[1]÷2-1)) .* Δk[1]
@@ -66,7 +66,7 @@ kz = (-(N[3] ÷ 2):(N[3]÷2-1)) .* Δk[3]
 
 # %% Load in zero-filled k-space data from .mat file
 f_ksp = h5open(fn_ksp, "r") # opne file in read mode
-ksp0 = f_ksp["ksp_zf"][:, :, :, :, start_frame:Nt]
+ksp0 = f_ksp["ksp_epi_zf"][:, :, :, :, start_frame:Nt]
 Nt = size(ksp0, 5)
 close(f_ksp)
 ksp0 = Complex{Float32}[complex(k.real, k.imag) for k in ksp0]
@@ -90,7 +90,7 @@ for it in 2:Nt
 end
 
 # %% Load in sensitivity maps
-smaps = matread(fn_smaps)["smaps_slice"] # raw coil sensitivity maps
+smaps = matread(fn_smaps)["smaps_raw"] # raw coil sensitivity maps
 
 # Crop to FOV
 x_range = round((FOV_gre[1] - FOV[1]) / FOV_gre[1] / 2 * N_gre[1] + 1):round(N_gre[1] - (FOV_gre[1] - FOV[1]) / FOV_gre[1] / 2 * N_gre[1])
@@ -142,22 +142,21 @@ X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 # ksp_nn = nn_viewshare(ksp0)
 # X0 = sense_comb(ksp_nn, smaps)
 
-# patch_sizes = [[1, 90, 90],
-#                 [1, 45, 45],
-#                 [1, 30, 30],
-#                 [1, 15, 15],
-#                 [1, 10, 10]]
-
 # %% Recon for a variety of hyperparameters
-for n in 2:5
+for n in 3:3
     # Set reconstruction hyperparameters for each scale
     # side lengths for cubic patches
-    patch_sizes = [[1, 10, 10]]
+    patch_sizes = [[90, 90, 60],
+                [45, 45, 30],
+                [30, 30, 20],
+                [15, 15, 10],
+                [10, 10, 6],
+                [5, 5, 3]]
     strides = patch_sizes # non-overlapping patches
     # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
-    λ_L = 10.0^-n
+    λ_L = 5*10.0^-n
 
-    Niters_outer = size(patch_sizes)[1] # Number of outer iterations, each using a different proximal operator
+    Niters_outer = 6 # Number of outer iterations, each using a different proximal operator
     Niters_inner = 10 # Number of inner iterations, each using the same proximal operator
     Niters = Niters_outer * Niters_inner
 
