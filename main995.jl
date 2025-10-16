@@ -1,5 +1,5 @@
-# %% Main993.jl
-# Prospectively undersampled ball phantom data
+# %% Main995.jl
+# Prospectively undersampled fingertapping data. 1.8 mm resolution
 using Pkg
 Pkg.activate(".")
 
@@ -39,17 +39,17 @@ include("analysis.jl")
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/mnt/storage/rexfung/20250926ball/"; # top directory
-fn_ksp = top_dir * "recon/ksp6x_100.mat"; # k-space file
+top_dir = "/mnt/storage/rexfung/20251003tap/"; # top directory
+fn_ksp = top_dir * "recon/ksp12x.mat"; # k-space file
 fn_smaps = top_dir * "recon/smaps.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "recon/tmp/rec_llr.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "recon/tmp/mslr12x_.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
-N = (90, 90, 60) # Spatial tensor size
+N = (120, 120, 80) # Spatial tensor size
 Nc = 10 # Number of virtual coils
-Nt = 100 # Number of time points
-start_frame = 6 # read in data after steady state is reached
+Nt = 440 # Number of time points
+start_frame = 1 # read in data after steady state is reached
 FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
@@ -143,15 +143,16 @@ X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 # X0 = sense_comb(ksp_nn, smaps)
 
 # %% Recon for a variety of hyperparameters
+X = zeros(size(X0))
 for n in 3:3
     # Set reconstruction hyperparameters for each scale
     # side lengths for cubic patches
-    patch_sizes = [[90, 90, 60],
-                [45, 45, 30],
+    patch_sizes = [[120, 120, 80],
+                [60, 60, 40],
                 [30, 30, 20],
                 [15, 15, 10],
-                [10, 10, 6],
-                [5, 5, 3]]
+                [10, 10, 8],
+                [6, 6, 4]]
     strides = patch_sizes # non-overlapping patches
     # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
     λ_L = 5*10.0^-n
@@ -170,7 +171,7 @@ for n in 3:3
     nn_costs[1] = nn_cost(X0)
 
     # Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-    X = X0
+    global X = X0
     for k in 1:Niters_outer
         # read in parameters for the current scale
         patch_size = patch_sizes[k]
@@ -189,7 +190,7 @@ for n in 3:3
         logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
 
         # POGM
-        X, costs = pogm_mod(X, (x) -> 0, dc_cost_grad, (σ1A / norm(ksp))^2;
+        global X, costs = pogm_mod(X, (x) -> 0, dc_cost_grad, (σ1A / norm(ksp))^2;
             mom=:pogm, niter=Niters_inner, g_prox=g_prox, fun=logger)
 
         # Save costs
@@ -212,5 +213,6 @@ for n in 3:3
             "lambda_L" => λ_L,
             "patch_sizes" => patch_sizes,
             "strides" => strides
-            ); compress=true)
+        ); compress=true)
 end
+
