@@ -45,15 +45,11 @@ function img2patches(img::AbstractArray, patch_size, stride_size)
 
     # slide through L and extract patches
     ip = 1 # patch counter
-    for iz in 0:Nsteps_z
-        for iy in 0:Nsteps_y
-            for ix in 0:Nsteps_x
-                patch = img[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :]
-                P[:, :, ip] = reshape(patch, (psx * psy * psz, Nt))
+    for iz in 0:Nsteps_z, iy in 0:Nsteps_y, ix in 0:Nsteps_x
+        patch = img[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :]
+        P[:, :, ip] = reshape(patch, (psx * psy * psz, Nt))
 
-                ip += 1
-            end
-        end
+        ip += 1
     end
 
     return P
@@ -99,17 +95,13 @@ function patches2img(P::AbstractArray, patch_size, stride_size, og_size)
 
     # slide through patches and allocate them to original
     ip = 1 # patch counter
-    for iz in 0:Nsteps_z
-        for iy in 0:Nsteps_y
-            for ix in 0:Nsteps_x
-                patch = reshape(P[:, :, ip], (psx, psy, psz, Nt))
-                img[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :] .+= patch
+    for iz in 0:Nsteps_z, iy in 0:Nsteps_y, ix in 0:Nsteps_x
+        patch = reshape(P[:, :, ip], (psx, psy, psz, Nt))
+        img[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :] .+= patch
 
-                Pcount[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz)] .+= 1
+        Pcount[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz)] .+= 1
 
-                ip += 1
-            end
-        end
+        ip += 1
     end
 
     # prevent division by 0 error for voxels uncovered by any patch
@@ -302,12 +294,10 @@ function img2patches2D(img::AbstractArray, patch_size, stride_size)
 
     # extract patches
     ip = 1
-    for iz in 0:Nsteps_z
-        for iy in 0:Nsteps_y
-            patch = img[iz*ssz.+(1:psz), iy*ssy.+(1:psy), :]
-            P[:, :, ip] = reshape(patch, (psz * psy, Nt))
-            ip += 1
-        end
+    for iz in 0:Nsteps_z, iy in 0:Nsteps_y
+        patch = img[iz*ssz.+(1:psz), iy*ssy.+(1:psy), :]
+        P[:, :, ip] = reshape(patch, (psz * psy, Nt))
+        ip += 1
     end
 
     return P
@@ -345,13 +335,11 @@ function patches2img2D(P::AbstractArray, patch_size, stride_size, og_size)
 
     # place patches into image
     ip = 1
-    for iz in 0:Nsteps_z
-        for iy in 0:Nsteps_y
-            patch = reshape(P[:, :, ip], (psz, psy, Nt))
-            img[iz*ssz.+(1:psz), iy*ssy.+(1:psy), :] .+= patch
-            Pcount[iz*ssz.+(1:psz), iy*ssy.+(1:psy)] .+= 1
-            ip += 1
-        end
+    for iz in 0:Nsteps_z, iy in 0:Nsteps_y
+        patch = reshape(P[:, :, ip], (psz, psy, Nt))
+        img[iz*ssz.+(1:psz), iy*ssy.+(1:psy), :] .+= patch
+        Pcount[iz*ssz.+(1:psz), iy*ssy.+(1:psy)] .+= 1
+        ip += 1
     end
 
     # avoid division by zero
