@@ -48,7 +48,7 @@ fn_recon_base = top_dir * "recon/tmp/mslr12x_.mat"; # reconsctruced fMRI file
 # EPI parameters
 N = (120, 120, 80) # Spatial tensor size
 Nc = 10 # Number of virtual coils
-Nt = 440 # Number of time points
+Nt = 438 # Number of time points
 start_frame = 1 # read in data after steady state is reached
 FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
@@ -144,7 +144,7 @@ X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 
 # %% Recon for a variety of hyperparameters
 X = zeros(size(X0))
-for n in 3:3
+for n in 2:2
     # Set reconstruction hyperparameters for each scale
     # side lengths for cubic patches
     patch_sizes = [[120, 120, 80],
@@ -157,7 +157,7 @@ for n in 3:3
     # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
     λ_L = 5*10.0^-n
 
-    Niters_outer = 6 # Number of outer iterations, each using a different proximal operator
+    Niters_outer = size(patch_sizes,1) # Number of outer iterations, each using a different proximal operator
     Niters_inner = 10 # Number of inner iterations, each using the same proximal operator
     Niters = Niters_outer * Niters_inner
 
