@@ -2,7 +2,7 @@
 using MAT, ProgressMeter
 
 # %%
-fn_base = "/mnt/storage/rexfung/20251106balltap/tap/mslr/rand6x_0.001";
+fn_base = "/mnt/storage/rexfung/20251024ball/recon/mslr/rand6x_0.005";
 Nx = 90
 Ny = 90
 Nz = 60
@@ -14,9 +14,8 @@ block_starts = Int.(1:Nt_block:Nt)
 
 # %%
 X = ComplexF32.(zeros(Nx, Ny, Nz, Nt))
-dc_costs = []; nn_costs = []; restarts = [];
-R = 0; Nscales = 0; Niters = 0; λ_L = 0; patch_sizes = zeros(Nscales, 3); strides = zeros(Nscales, 3)
-σ1As = [];
+dc_costs = []; nn_costs = [];
+R = 0; Nscales = 0; Niters_inner = 0; λ_L = 0; patch_sizes = zeros(Nscales, 3); strides = zeros(Nscales, 3)
 @showprogress 1 "Combining blocks..." for block in 1:length(block_starts)
     fn_block = fn_base * "_block$block.mat"
     f_block = matread(fn_block)
@@ -26,20 +25,16 @@ R = 0; Nscales = 0; Niters = 0; λ_L = 0; patch_sizes = zeros(Nscales, 3); strid
     if block == 1
         dc_costs = f_block["dc_costs"]
         nn_costs = f_block["nn_costs"]
-        restarts = f_block["restarts"]
         R = f_block["R"]
         Nscales = f_block["Nscales"]
-        Niters = f_block["Niters"]
+        Niters_inner = f_block["Niters_inner"]
         λ_L = f_block["lambda_L"]
         patch_sizes = f_block["patch_sizes"]
         strides = f_block["strides"]
     else
         dc_costs += f_block["dc_costs"]
         nn_costs += f_block["nn_costs"]
-        restarts += f_block["restarts"]
     end
-    
-    push!(σ1As, f_block["sigma1A"])
 end
 
 # %%
@@ -48,12 +43,10 @@ matwrite(fn_recon, Dict(
             "X" => X,
             "dc_costs" => dc_costs,
             "nn_costs" => nn_costs,
-            "restarts" => restarts,
             "R" => R,
             "Nscales" => Nscales,
-            "Niters" => Niters,
+            "Niters_inner" => Niters_inner,
             "lambda_L" => λ_L,
             "patch_sizes" => patch_sizes,
-            "strides" => strides,
-            "sigma1As" => σ1As
+            "strides" => strides
         ); compress=true)

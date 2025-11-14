@@ -1,5 +1,5 @@
-# %% Main996.jl
-# Prospectively undersampled fingertapping data. 2.4mm. Local in time
+# %% Main997.jl
+# Prospectively undersampled fingertapping data. 2.4mm. Local in time. Cycle through patch sizes per iteration
 using Pkg
 Pkg.activate(".")
 
@@ -130,15 +130,12 @@ for block in 1:length(block_starts)
 
     # %% Compute Lipschitz constant of MRI forward operator
     σ1A = nothing
-    σ1A = 0.892 # Computed from last time
+    # σ1A = 0.892 # 20251024ball rand6x
+    # σ1A = 1.0 # 20251003tap rand6x
     if !(@isdefined σ1A) || isnothing(σ1A)
         (_, σ1A) = poweriter_mod(undim(A)) # Compute using power iteration. Takes ~20 mins, converged at itr 125.
         print("σ1A = ", round(σ1A, digits=3))
     end
-
-    # %% Define dc cost and its gradient
-    dc_cost = X -> 0.5 * norm(A * X - ksp)^2
-    dc_cost_grad = X -> A' * (A * X - ksp)
 
     # %% Initialize solution
     X0 = A' * ksp; # zero-filled
@@ -158,49 +155,46 @@ for block in 1:length(block_starts)
     # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
     λ_L = 5e-3
 
+    # %% Define dc cost and its gradient
+    dc_cost = X -> 0.5 * norm(A * X - ksp)^2
+    dc_cost_grad = X -> A' * (A * X - ksp)
+
     Nscales = size(patch_sizes, 1) # Number of scales, each using a different proximal operator
-    Niters_inner = 20 # Number of inner iterations, each using the same proximal operator
-    Niters = Nscales * Niters_inner
 
-    # Define first regularizer as global nuclear norm
-    nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_sizes[1], strides[1]))
-
-    # Compute initial cost
-    dc_costs = zeros(Niters+1)
-    nn_costs = zeros(Niters+1)
-    dc_costs[1] = dc_cost(X0)
-    nn_costs[1] = nn_cost(X0)
-
-    # Begin iterative reconstruction using ISTA (Otazo et al. 2015), without S part
-    for k in 1:Nscales
-        # read in parameters for the current scale
-        patch_size = patch_sizes[k]
-        stride = strides[k]
-
-        println("Reconstructing outer iteration $k / $Nscales.
-                patch_size = $patch_size, stride = $stride")
-        
-        # Redefine nuclear norm and proximal step
-        nn_cost = X -> λ_L * patch_nucnorm(img2patches(X, patch_size, stride))
-        function g_prox(X, c)
-            println()
-            println("Threshold (c × λ_L) = ", round(c*λ_L, digits=3))
-            return patchSVST(X, c*λ_L, patch_size, stride)
+    # %% Define nn cost and its proximal step
+    function nn_cost(X)
+        cost = 0
+        for k in 1:Nscales
+            cost += λ_L * patch_nucnorm(img2patches(X, patch_sizes[k], strides[k]))
         end
+        return cost / Nscales
+    end
 
-        # Log data-consistency and regularization costs
-        logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk))
-
-        # POGM
-        X, costs = pogm_mod(X, (X) -> dc_cost(X) + nn_cost(X), dc_cost_grad, σ1A^2;
-            mom=:pogm, niter=Niters_inner, g_prox=g_prox, fun=logger)
-
-        # Save costs
-        iter_range = 1 .+ ((1 + (k-1)*Niters_inner):k*Niters_inner)
-        for l in 1:Niters_inner
-            dc_costs[iter_range[l]] = costs[1 + l][1]
-            nn_costs[iter_range[l]] = costs[1 + l][2]
+    function g_prox(X, c)
+        println()
+        println("Threshold (c × λ_L) = ", round(c*λ_L, digits=3))
+        for k in 1:Nscales
+            X = patchSVST(X, c*λ_L, patch_sizes[k], strides[k])
         end
+        return X
+    end
+
+    # Log data-consistency and regularization costs
+    logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), nn_cost(xk), is_restart)
+
+    # POGM
+    Niters = 20
+    X, costs = pogm_mod(X, (X) -> dc_cost(X) + nn_cost(X), dc_cost_grad, σ1A^2;
+        mom=:pogm, niter=Niters, g_prox=g_prox, fun=logger)
+
+    # Unpack costs
+    dc_costs = zeros(Niters + 1)
+    nn_costs = zeros(Niters + 1)
+    restarts = falses(Niters + 1)
+    for i in 1:Niters+1
+        dc_costs[i] = costs[i][1]
+        nn_costs[i] = costs[i][2]
+        restarts[i] = costs[i][3]
     end
 
     # Save to file
@@ -210,10 +204,12 @@ for block in 1:length(block_starts)
             "R" => R,
             "dc_costs" => dc_costs,
             "nn_costs" => nn_costs,
+            "restarts" => restarts,
             "Nscales" => Nscales,
-            "Niters_inner" => Niters_inner,
+            "Niters" => Niters,
             "lambda_L" => λ_L,
             "patch_sizes" => patch_sizes,
-            "strides" => strides
+            "strides" => strides,
+            "sigma1A" => σ1A
         ); compress=true)
 end

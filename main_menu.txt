@@ -17,3 +17,11 @@ main96.jl: 3D + time recon for 2025/06/09 ball experiment. Trimming script outpu
 main97.jl: nn-interpolated initialization. Moved plotting code to main_analysis.jl
 main98.jl: Retrospectively undersampled data from fully-sampled GRE images
 main99.jl: Non-overlapping multiscale patches. This one is GOOD!
+main991.jl: Non-overlappin MSLR. Brain data.
+main992.jl: Synethetic task fMRI data over resting state brain data.
+main993.jl: Prospectively undersampled ball phantom data.
+main994.jl: Prospectively undersampled fingertapping data.
+main995.jl: Prospectively undersampled fingertapping data. 1.8 mm resolution.
+main996.jl: Prospectively undersampled fingertapping data. 2.4mm. Local in time.
+main997.jl: Prospectively undersampled fingertapping data. 2.4mm. Local in time. Cycle through patch sizes per iteration
+main998.jl: 20251106 ball + tap data. 2.4mm. Local in time. Cycle through patch sizes per iteration.

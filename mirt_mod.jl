@@ -158,7 +158,7 @@ function pogm_mod(
     ynew = []
 
     # iterations
-    @showprogress 1 "Reconstructing via POGM..." for iter in 1:niter
+    @showprogress 1 "Reconstructing via $mom..." for iter in 1:niter
 
         # proximal gradient (PGM) update
         if mom === :pgm && mu != 0
