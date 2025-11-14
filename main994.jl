@@ -137,7 +137,7 @@ dc_cost_grad = X -> A' * (A * X - ksp) / norm(ksp)^2
 
 # %% Initialize solution
 X0 = A' * ksp; # zero-filled
-X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
+# X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 # nearest-neighbor interpolated, smaps-weighted IFT recon
 # ksp_nn = nn_viewshare(ksp0)
 # X0 = sense_comb(ksp_nn, smaps)
@@ -155,7 +155,7 @@ patch_sizes = [[90, 90, 60],
             [10, 10, 6]]
 strides = patch_sizes # non-overlapping patches
 # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
-λ_L = 2.5e-2
+λ_L = 5e-2
 
 Niters_outer = size(patch_sizes, 1) # Number of outer iterations, each using a different proximal operator
 Niters_inner = 10 # Number of inner iterations, each using the same proximal operator

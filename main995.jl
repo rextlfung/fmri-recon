@@ -42,7 +42,7 @@ include("analysis.jl")
 top_dir = "/mnt/storage/rexfung/20251003tap/"; # top directory
 fn_ksp = top_dir * "recon/ksp12x.mat"; # k-space file
 fn_smaps = top_dir * "recon/smaps.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "recon/tmp/mslr12x_.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "recon/mslr/12x.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
@@ -137,22 +137,21 @@ dc_cost_grad = X -> A' * (A * X - ksp) / norm(ksp)^2
 
 # %% Initialize solution
 X0 = A' * ksp; # zero-filled
-X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
+# X0 = repeat(mean(X0, dims = 4), outer = [1, 1, 1, Nt]); # temporal average
 # nearest-neighbor interpolated, smaps-weighted IFT recon
 # ksp_nn = nn_viewshare(ksp0)
 # X0 = sense_comb(ksp_nn, smaps)
 
 # %% Recon for a variety of hyperparameters
 X = zeros(size(X0))
-for n in 2:2
+for n in 3:4
     # Set reconstruction hyperparameters for each scale
     # side lengths for cubic patches
     patch_sizes = [[120, 120, 80],
                 [60, 60, 40],
                 [30, 30, 20],
                 [15, 15, 10],
-                [10, 10, 8],
-                [6, 6, 4]]
+                [10, 10, 8]]
     strides = patch_sizes # non-overlapping patches
     # weight for nuclear norm penalty term. Also represents the threshold of discarded SVs at every inner iteration
     λ_L = 5*10.0^-n
@@ -215,4 +214,3 @@ for n in 2:2
             "strides" => strides
         ); compress=true)
 end
-
