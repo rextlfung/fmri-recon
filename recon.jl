@@ -134,7 +134,8 @@ function patch_nucnorm(P::AbstractArray)
     costs = zeros(Np)
 
     @threads for ip in 1:Np
-        svs = svdvals(copy(P[:, :, ip]))
+        P_view = P[:, :, ip]
+        svs = svdvals(P_view)
         if svs[1] > 0
             costs[ip] = sum(svs ./ svs[1])
         else

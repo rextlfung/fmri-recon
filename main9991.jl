@@ -1,5 +1,5 @@
 # %% Main9991.jl
-# 20260105. Ball phantom scanned with Poisson-disc sampling pattern in ky-kz.
+# 20260118. Ball phantom scanned with Poisson-disc sampling pattern in ky-kz.
 using Pkg
 Pkg.activate(".")
 
@@ -7,16 +7,13 @@ Pkg.activate(".")
 # Linear algebra
 using LinearAlgebra
 using LinearMapsAA: LinearMapAA, block_diag, redim, undim
-using MIRT: Asense, pogm_restart
+using MIRT: Asense
 
 # Probability and statistics
 using Statistics, StatsBase
 
 # Interpolation
 using ImageTransformations: imresize
-
-# Parallel computing
-using Base.Threads
 
 # Progress
 using ProgressMeter
@@ -40,7 +37,7 @@ includet("analysis.jl"); using .analysis
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/mnt/storage/rexfung/20260118ball/recon/"; # top directory
+top_dir = "/StorageRAID/rexfung/20260118ball/recon/"; # top directory
 fn_ksp = top_dir * "PD_ksp_epi_zf.mat"; # k-space file
 fn_smaps = top_dir * "smaps_bart.mat"; # sensitivity maps file
 fn_recon_base = top_dir * "PD_recon.mat"; # reconsctruced fMRI file
@@ -102,6 +99,7 @@ for ic in 2:Nvc
 end
 
 # 2. All time frames acquire the same number of samples
+
 for it in 2:Nt
     @assert sum(Ω[:, :, :, it]) == sum(Ω[:, :,   :, it-1]) "Detected a different number of samples for frame $it"
 end
