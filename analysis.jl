@@ -2,6 +2,10 @@
 Collection of functions for conducting statistical analyses on reconstructued images.
 fMRI stuff
 =#
+module analysis
+
+export tSNR
+
 using Statistics: mean, std
 
 """
@@ -20,4 +24,6 @@ function tSNR(img::AbstractArray)
     N = ndims(mag)
     ϵ = eps(eltype(mag)) # avoid dividing by 0
     return dropdims(mean(mag, dims=N) ./ (std(mag, dims=N) .+ ϵ); dims=N)
+end
+
 end

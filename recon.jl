@@ -1,6 +1,7 @@
 #=
 Collection of functions to be used on iterative image reconstruction.
 =#
+module recon
 
 using Base.Threads
 using LinearAlgebra
@@ -393,4 +394,6 @@ function patchSVST2D(img::AbstractArray, β, patch_size, stride_size)
 
     # recombine patches into image
     return patches2img2D(P, patch_size, stride_size, size(img)[1:2])
+end
+
 end

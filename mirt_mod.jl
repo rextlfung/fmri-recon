@@ -9,6 +9,7 @@ Contents:
 Modified on 2025-06-17, Rex Fung, University of Michigan
 1. To include progress bars using ProgressMeter
 =#
+module mirt_mod
 
 export pogm_mod, poweriter_mod
 
@@ -295,3 +296,5 @@ function poweriter_mod(
     end
     return x, norm(A * x) / norm(x)
 end;
+
+end

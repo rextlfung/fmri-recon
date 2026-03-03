@@ -32,17 +32,18 @@ using MIRTjim: jim, mid3
 using Unitful: mm
 using LaTeXStrings
 
-# %% Local helper functions
-include("mirt_mod.jl")
-include("recon.jl")
-include("analysis.jl")
+# %% Local helper modules
+using Revise
+includet("mirt_mod.jl"); using .mirt_mod
+includet("recon.jl"); using .recon: img2patches, patch_nucnorm, patchSVST
+includet("analysis.jl"); using .analysis
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "../data/20260118ball/recon/"; # top directory
-fn_ksp = top_dir * "CAIPI_ksp_epi_zf.mat"; # k-space file
+top_dir = "/mnt/storage/rexfung/20260118ball/recon/"; # top directory
+fn_ksp = top_dir * "PD_ksp_epi_zf.mat"; # k-space file
 fn_smaps = top_dir * "smaps_bart.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "CAIPI_recon.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "PD_recon.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
