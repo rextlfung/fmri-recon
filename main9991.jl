@@ -1,7 +1,7 @@
 # %% Main9991.jl
 # 20260118. Ball phantom scanned with Poisson-disc sampling pattern in ky-kz.
 using Pkg
-Pkg.activate(".")
+Pkg.activate("."); Pkg.update(); Pkg.resolve()
 
 # %% Import packages
 # Linear algebra
@@ -37,7 +37,7 @@ includet("analysis.jl"); using .analysis
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/StorageRAID/rexfung/20260118ball/recon/"; # top directory
+top_dir = "../data/20260118ball/recon/"; # top directory
 fn_ksp = top_dir * "PD_ksp_epi_zf.mat"; # k-space file
 fn_smaps = top_dir * "smaps_bart.mat"; # sensitivity maps file
 fn_recon_base = top_dir * "PD_recon.mat"; # reconsctruced fMRI file
