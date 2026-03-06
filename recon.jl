@@ -47,9 +47,8 @@ function img2patches(img::AbstractArray, patch_size, stride_size)
     # slide through L and extract patches
     ip = 1 # patch counter
     for iz in 0:Nsteps_z, iy in 0:Nsteps_y, ix in 0:Nsteps_x
-        patch = img[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :]
-        P[:, :, ip] = reshape(patch, (psx * psy * psz, Nt))
-
+        patch = view(img, ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :)
+        P[:, :, ip] .= reshape(patch, (psx * psy * psz, Nt))
         ip += 1
     end
 
@@ -108,7 +107,7 @@ function patches2img(P::AbstractArray, patch_size, stride_size, og_size)
     # prevent division by 0 error for voxels uncovered by any patch
     Pcount[Pcount.==0] .= 1
 
-    # Divide each voxel by their number of contributing patches
+    # Proximal averaging: divide each voxel by their number of contributing patches
     img ./= Pcount
 
     return img
@@ -134,10 +133,44 @@ function patch_nucnorm(P::AbstractArray)
     costs = zeros(Np)
 
     @threads for ip in 1:Np
-        P_view = P[:, :, ip]
+        P_view = view(P,:,:,ip)
         svs = svdvals(P_view)
+        # if svs[1] > 0
+        #     costs[ip] = sum(svs ./ svs[1])
+        # else
+        #     costs[ip] = 0
+        # end
+        costs[ip] = sum(svs)
+    end
+
+    # return sum(costs) / Np
+    return sum(costs)
+end;
+
+"""
+patch_nucnorm(P::AbstractArray, λs::Vector)
+
+compute the sum of nuclear norm of patches.
+each patch is first normalized by its spectral norm.
+final cost is normalized by the number of patches
+
+Inputs:
+P: 3D tensor of (space x time) patch matrices. size = (prod(patch_size), Nt, Np)
+λs: Np long vector of regularization weights
+
+Outputs:
+cost: scalar normalized nuclear norm penalty.
+"""
+function patch_nucnorm(P::AbstractArray, λs::Vector)
+    @assert ndims(P) == 3 "P should be a 3D tensor (space x time x patch)"
+
+    Np = size(P, ndims(P))
+    costs = zeros(Np)
+
+    @threads for ip in 1:Np
+        svs = svdvals(copy(P[:, :, ip]))
         if svs[1] > 0
-            costs[ip] = sum(svs ./ svs[1])
+            costs[ip] = λs[ip] * sum(svs)
         else
             costs[ip] = 0
         end
@@ -161,8 +194,8 @@ low-rankified version of X
 """
 function SVST(X::AbstractMatrix, β)
     U, s, V = svd(X)
-    sthresh = @. max(abs(s) - β, 0) * exp(1im * angle(s))
-    keep = findall(!=(0), sthresh)
+    sthresh = @. max(s - β, 0)
+    keep = findall(>(0), sthresh)
     return U[:, keep] * Diagonal(sthresh[keep]) * V[:, keep]'
 end;
 
@@ -187,22 +220,53 @@ function patchSVST(img::AbstractArray, β, patch_size, stride_size)
     Np = size(P, ndims(P))
 
     # normalize each patch via division of their 2-norm (leading SV)
-    σ1s = [opnorm(P[:, :, ip]) for ip in 1:Np]
-    σ1s[σ1s.==0] .= eps() # avoid division by 0
-    P ./= reshape(σ1s, 1, 1, :)
+    # σ1s = [opnorm(P[:, :, ip]) for ip in 1:Np]
+    # σ1s[σ1s.==0] .= eps() # avoid division by 0
+    # P ./= reshape(σ1s, 1, 1, :)
 
     # low-rankify each patch
     @threads for ip in 1:Np
-        P[:, :, ip] = SVST(P[:, :, ip], β) # can this be done in-place for speed?
+        P[:, :, ip] .= SVST(view(P,:,:,ip), β)
     end
 
     # rescale so leading SV = 1 before reverting normalization
-    σ1s_tmp = [opnorm(P[:, :, ip]) for ip in 1:Np]
-    σ1s_tmp[σ1s_tmp.==0] .= eps() # avoid division by 0
-    P ./= reshape(σ1s_tmp, 1, 1, :)
+    # σ1s_tmp = [opnorm(P[:, :, ip]) for ip in 1:Np]
+    # σ1s_tmp[σ1s_tmp.==0] .= eps() # avoid division by 0
+    # P ./= reshape(σ1s_tmp, 1, 1, :)
 
     # revert normalization to preserve inter-patch contrast
-    P .*= reshape(σ1s, 1, 1, :)
+    # P .*= reshape(σ1s, 1, 1, :)
+
+    # recombine patches into image
+    img = patches2img(P, patch_size, stride_size, size(img)[1:3])
+
+    return img
+end;
+
+"""
+patchSVST(img::AbstractArray, λs::Vector, patch_size, stride_size)
+
+apply SVST to in a patch-wise manner to an image
+average of proximal operators to the nuclear norm
+
+Inputs:
+img: 3D time series data of size (Nx, Ny, Nz, Nt)
+λs: soft-thresholding thresholds, one for each patch
+patch_size: length 3 vector describing the side lengths of cubic patches
+stride_size: length 3 vector describing the stride lengths between patches
+
+Outputs:
+patch-wise low-rankified version of img
+"""
+function patchSVST(img::AbstractArray, λs::Vector, patch_size, stride_size)
+    # extract patches
+    P = img2patches(img, patch_size, stride_size)
+    Np = size(P, ndims(P))
+
+    # low-rankify each patch
+    @threads for ip in 1:Np
+        P[:, :, ip] = SVST(P[:, :, ip], λs[ip]) # can this be done in-place for speed?
+    end
 
     # recombine patches into image
     img = patches2img(P, patch_size, stride_size, size(img)[1:3])
@@ -262,6 +326,8 @@ function sense_comb(ksp::AbstractArray, smaps::AbstractArray)
     end
     return img
 end
+
+# -------------------------------------------------------------------------------
 # %% Functions for 2D x time data
 
 """
