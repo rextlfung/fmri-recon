@@ -24,10 +24,12 @@ using MAT, HDF5
 # Plotting
 using Plots
 using MIRTjim: jim, mid3
+# change backened
+plotlyjs()
 # Set global defaults
 default(
-    size = (800, 600), # Width and height in pixels
-    dpi = 300          # Dots per inch (resolution)
+    size = (1400, 900), # Width and height in pixels
+    dpi = 400          # Dots per inch (resolution)
 )
 
 # Readability
@@ -42,17 +44,17 @@ includet("utils.jl"); using .utils: tSNR, plotOpt
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/StorageRAID/rexfung/20260118ball/recon/"; # top directory
-fn_ksp = top_dir * "PD_ksp_epi_zf.mat"; # k-space file
+top_dir = "/StorageRAID/rexfung/20251106balltap/tap/recon/"; # top directory
+fn_ksp = top_dir * "rand6x.mat"; # k-space file
 fn_smaps = top_dir * "smaps_bart.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "PD_recon.mat"; # reconsctruced fMRI file
+fn_recon_base = top_dir * "recon.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
 N = (90, 90, 60) # Spatial tensor size
 (Nx, Ny, Nz) = N
-Nvc = 12 # Number of virtual coils
-Nt = 12 # Number of time points
+Nvc = 18 # Number of virtual coils
+Nt = 300 # Number of time points
 FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
@@ -138,16 +140,21 @@ end
 
 # %% Set reconstruction hyperparameters
 # side lengths for cubic patches
-patch_sizes = [[90, 90, 60],
-            [45, 45, 30],
-            [30, 30, 30],
-            [15, 15, 15],
-            [10, 10, 10],
-            [6, 6, 6],
-            [3, 3, 3],
-            [1, 1, 1]]
+# patch_sizes = [[Nx, Ny, Nz]] # global low-rank
+# patch_sizes = [[Nx, Ny, Nz], [1, 1, 1]] # low-rank + sparse
+patch_sizes = [[10, 10, 10]] # local low-rank
+# patch_sizes = [[90, 90, 60], # multiscale low-rank
+#             [30, 30, 30],
+#             [10, 10, 10],
+#             [6, 6, 6],
+#             [1, 1, 1]] # Fix recon code for enforcing sparsity (add an if-else)!!!
+
 strides = patch_sizes # non-overlapping patches
+# strides = [cld.(patch_size, 2) for patch_size in patch_sizes] # 1/2 overlapping patches
+
 Nscales = size(patch_sizes, 1)
+
+L = Nscales*(σ1A^2); # Lipschitz constant
 
 # scale-specific regularization weights
 # computed according to recommendations in Ong, Lustig 2016
@@ -168,11 +175,10 @@ function reg_cost(X::AbstractArray)
 end
 
 function g_prox(X::AbstractArray, c)
-    X_prox = similar(X)
     for k in 1:Nscales
-        @views X_prox[:,:,:,:,k] = patchSVST(view(X,:,:,:,:,k), c*λs[k], patch_sizes[k], strides[k])
+        @views X[:,:,:,:,k] = patchSVST(view(X,:,:,:,:,k), c*λs[k], patch_sizes[k], strides[k])
     end
-    return X_prox
+    return X
 end
 
 function comp_cost(X::AbstractArray)
@@ -186,16 +192,16 @@ logger = (iter, xk, yk, is_restart) -> (dc_cost(xk), reg_cost(xk), is_restart);
 # One component per scale
 # Initialize global low-rank component as adjoint recon
 # Initialize other components as zero
-X0 = zeros(ComplexF32, Nx, Ny, Nz, Nt, Nscales)
-X0[:,:,:,:,1] = A' * ksp;
+X0 = zeros(ComplexF32, Nx, Ny, Nz, Nt, Nscales);
+X0[:,:,:,:,1] = A' * ksp; nothing
 
 # Scale λs to data
 # λs .*= dc_cost(X0)/max(reg_cost(X0), eps(Float32))
 
 # %% POGM
 X = copy(X0);
-Niters = 100
-X, costs = pogm_mod(X, comp_cost, dc_cost_grad, Nscales*(σ1A^2);
+Niters = 50
+X, costs = pogm_mod(X, comp_cost, dc_cost_grad, L;
     mom=:pogm, niter=Niters, g_prox=g_prox, fun=logger)
 
 # Unpack costs
@@ -208,11 +214,17 @@ for i in 1:Niters+1
     restarts[i] = costs[i][3]
 end
 
-# %% Plot costs and restarts
-plotOpt(dc_costs, reg_costs, restarts, true)
+# %% Plot costs and restarts w/ plotlyjs()
+plotlyjs(); plotOpt(dc_costs, reg_costs, restarts, true)
+
+# %%
+gr(); jim(sum(X,dims=5)[:,:,:,1])
+
+# %%
+jim(X[:,:,30,1,:])
 
 # %% Save to file
-fn_recon = fn_recon_base[1:end-4] * "_$(Niters)itrs.mat"
+fn_recon = fn_recon_base[1:end-4] * "_$(Nscales)scales.mat"
 matwrite(fn_recon, Dict(
     "X" => X, # final image
     "dc_costs" => dc_costs, # data consistency record
@@ -220,9 +232,17 @@ matwrite(fn_recon, Dict(
     "restarts" => restarts, # POGM restarts record
     "R" => R, # acceleration factor of k-space sampling
     "sigma1A" => σ1A, # spectral norm of system matrix A
+    "L" => L, # lipschitz constant
     "Nscales" => Nscales, # number of scales for multi-scale low-rank
     "patch_sizes" => patch_sizes, # patch sizes
     "strides" => strides, # patch strides
     "lambdas" => λs, # regularization weights
     "Niters" => Niters, # number of POGM iterations
 ); compress=true)
+
+# %% Load file (manual use)
+vars = matread(fn_recon)
+
+for (key, val) in vars
+    @eval $(Symbol(key)) = $val
+end

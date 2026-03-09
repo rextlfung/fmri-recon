@@ -34,9 +34,9 @@ function img2patches(img::AbstractArray, patch_size, stride_size)
     psz = min(psz, Nz)
 
     # calculate number of steps in each direction
-    Nsteps_x = fld(Nx - psx, ssx)
-    Nsteps_y = fld(Ny - psy, ssy)
-    Nsteps_z = fld(Nz - psz, ssz)
+    Nsteps_x = cld(Nx - psx, ssx)
+    Nsteps_y = cld(Ny - psy, ssy)
+    Nsteps_z = cld(Nz - psz, ssz)
 
     # calculate number of patches to extract
     Np = (Nsteps_x + 1) * (Nsteps_y + 1) * (Nsteps_z + 1)
@@ -45,9 +45,15 @@ function img2patches(img::AbstractArray, patch_size, stride_size)
     P = zeros(ComplexF32, (psx * psy * psz, Nt, Np))
 
     # slide through L and extract patches
-    ip = 1 # patch counter
+    ip = 1
     for iz in 0:Nsteps_z, iy in 0:Nsteps_y, ix in 0:Nsteps_x
-        patch = view(img, ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :)
+        # Clamp start indices so the patch always stays within the image
+        sx = min(ix*ssx + 1, Nx - psx + 1)
+        sy = min(iy*ssy + 1, Ny - psy + 1)
+        sz = min(iz*ssz + 1, Nz - psz + 1)
+
+        # Use views to prevent allocating a copy of the patch!
+        patch = view(img, sx:sx+psx-1, sy:sy+psy-1, sz:sz+psz-1, :)
         P[:, :, ip] .= reshape(patch, (psx * psy * psz, Nt))
         ip += 1
     end
@@ -83,9 +89,9 @@ function patches2img(P::AbstractArray, patch_size, stride_size, og_size)
     psz = min(psz, Nz)
 
     # calculate number of steps in each direction
-    Nsteps_x = fld(Nx - psx, ssx)
-    Nsteps_y = fld(Ny - psy, ssy)
-    Nsteps_z = fld(Nz - psz, ssz)
+    Nsteps_x = cld(Nx - psx, ssx)
+    Nsteps_y = cld(Ny - psy, ssy)
+    Nsteps_z = cld(Nz - psz, ssz)
 
     # preallocate memory for output
     img = zeros(ComplexF32, (Nx, Ny, Nz, Nt))
@@ -96,11 +102,14 @@ function patches2img(P::AbstractArray, patch_size, stride_size, og_size)
     # slide through patches and allocate them to original
     ip = 1 # patch counter
     for iz in 0:Nsteps_z, iy in 0:Nsteps_y, ix in 0:Nsteps_x
-        patch = reshape(P[:, :, ip], (psx, psy, psz, Nt))
-        img[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz), :] .+= patch
+        # Clamp start indices so the patch always stays within the image
+        sx = min(ix*ssx + 1, Nx - psx + 1)
+        sy = min(iy*ssy + 1, Ny - psy + 1)
+        sz = min(iz*ssz + 1, Nz - psz + 1)
 
-        Pcount[ix*ssx.+(1:psx), iy*ssy.+(1:psy), iz*ssz.+(1:psz)] .+= 1
-
+        patch = reshape(view(P,:,:,ip), (psx, psy, psz, Nt))
+        img[sx:sx+psx-1, sy:sy+psy-1, sz:sz+psz-1, :] .+= patch
+        Pcount[sx:sx+psx-1, sy:sy+psy-1, sz:sz+psz-1, :] .+= 1
         ip += 1
     end
 
@@ -226,7 +235,7 @@ function patchSVST(img::AbstractArray, β, patch_size, stride_size)
 
     # low-rankify each patch
     @threads for ip in 1:Np
-        P[:, :, ip] .= SVST(view(P,:,:,ip), β)
+        @views P[:, :, ip] .= SVST(view(P,:,:,ip), β)
     end
 
     # rescale so leading SV = 1 before reverting normalization

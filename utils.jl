@@ -37,7 +37,7 @@ restarts: bool vector indicating when momentum was restarted.
 Optional inputs:
 logscale: bool flag indicating log-scale plotting
 """
-function plotOpt(dc_costs::Vector, reg_costs::Vector, restarts::BitVector, logscale::Bool=false)
+function plotOpt(dc_costs::Vector, reg_costs::Vector, restarts::AbstractVector, logscale::Bool=false)
     # 1. Define the iteration range
     Niters = length(dc_costs) - 1
     iters = 0:Niters
