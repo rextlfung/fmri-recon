@@ -44,17 +44,17 @@ includet("utils.jl"); using .utils: tSNR, plotOpt
 
 # %% Declare and set path and experimental variables
 # Path variables specific to this machine
-top_dir = "/StorageRAID/rexfung/20251106balltap/tap/recon/"; # top directory
-fn_ksp = top_dir * "rand6x.mat"; # k-space file
-fn_smaps = top_dir * "smaps_bart.mat"; # sensitivity maps file
-fn_recon_base = top_dir * "recon.mat"; # reconsctruced fMRI file
+top_dir = "/StorageRAID/rexfung/20260317tap/recon/"; # top directory
+fn_ksp = top_dir * "caipi_epi_zf.mat"; # k-space file
+fn_smaps = top_dir * "smaps.mat"; # sensitivity maps file
+fn_recon_base = top_dir * "caipi_recon.mat"; # reconsctruced fMRI file
 
 # %% Experimental parameters
 # EPI parameters
 N = (90, 90, 60) # Spatial tensor size
 (Nx, Ny, Nz) = N
 Nvc = 18 # Number of virtual coils
-Nt = 300 # Number of time points
+Nt = 387 # Number of time points
 FOV = (216mm, 216mm, 144mm) # Field of view
 Δ = FOV ./ N # Voxel size
 kFOV = 2 ./ Δ # k-space field of view
@@ -142,15 +142,15 @@ end
 # side lengths for cubic patches
 # patch_sizes = [[Nx, Ny, Nz]] # global low-rank
 # patch_sizes = [[Nx, Ny, Nz], [1, 1, 1]] # low-rank + sparse
-patch_sizes = [[10, 10, 10]] # local low-rank
-# patch_sizes = [[90, 90, 60], # multiscale low-rank
-#             [30, 30, 30],
-#             [10, 10, 10],
-#             [6, 6, 6],
-#             [1, 1, 1]] # Fix recon code for enforcing sparsity (add an if-else)!!!
+# patch_sizes = [[10, 10, 10]] # local low-rank
+patch_sizes = [[90, 90, 60], # multiscale low-rank
+            [30, 30, 30],
+            [10, 10, 10],
+            [6, 6, 6],
+            [1, 1, 1]]
 
-strides = patch_sizes # non-overlapping patches
-# strides = [cld.(patch_size, 2) for patch_size in patch_sizes] # 1/2 overlapping patches
+# strides = patch_sizes # non-overlapping patches
+strides = [cld.(patch_size, 2) for patch_size in patch_sizes] # 1/2 overlapping patches
 
 Nscales = size(patch_sizes, 1)
 
@@ -231,6 +231,7 @@ matwrite(fn_recon, Dict(
     "reg_costs" => reg_costs, # regularizer record
     "restarts" => restarts, # POGM restarts record
     "R" => R, # acceleration factor of k-space sampling
+    "Omega" => Ω, # sampling mask
     "sigma1A" => σ1A, # spectral norm of system matrix A
     "L" => L, # lipschitz constant
     "Nscales" => Nscales, # number of scales for multi-scale low-rank

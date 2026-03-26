@@ -138,6 +138,11 @@ cost: scalar normalized nuclear norm penalty.
 function patch_nucnorm(P::AbstractArray)
     @assert ndims(P) == 3 "P should be a 3D tensor (space x time x patch)"
 
+    # special case for patch size = 1^3
+    if size(P, 1) == 1
+        return sum(abs.(P)) # = sum(sum(abs.(P), dims=(1,2)), dims=3)
+    end
+
     Np = size(P, ndims(P))
     costs = zeros(Np)
 
@@ -174,10 +179,15 @@ function patch_nucnorm(P::AbstractArray, λs::Vector)
     @assert ndims(P) == 3 "P should be a 3D tensor (space x time x patch)"
 
     Np = size(P, ndims(P))
-    costs = zeros(Np)
 
+    # special case for patch size = 1^3
+    if size(P, 1) == 1
+        return sum(abs.(P) .* reshape(λs, 1, 1, Np))
+    end
+
+    costs = zeros(Np)
     @threads for ip in 1:Np
-        svs = svdvals(copy(P[:, :, ip]))
+        svs = svdvals(P[:, :, ip])
         if svs[1] > 0
             costs[ip] = λs[ip] * sum(svs)
         else
@@ -202,8 +212,13 @@ Outputs:
 low-rankified version of X
 """
 function SVST(X::AbstractMatrix, β)
+    # special case for patch size = 1^3
+    if size(X, 1) == 1
+        return sign.(X) .* max.(abs.(X) .- β, 0)
+    end
+
     U, s, V = svd(X)
-    sthresh = @. max(s - β, 0)
+    sthresh = max.(s .- β, 0)
     keep = findall(>(0), sthresh)
     return U[:, keep] * Diagonal(sthresh[keep]) * V[:, keep]'
 end;
